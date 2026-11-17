@@ -20,6 +20,11 @@ from datetime import datetime,timezone
 import yaml
 
 
+def _course_home():
+    from orimem import config
+    return config.layout_path('course_home')
+
+
 _ENTRY_TYPES = {"project", "course", "other"}
 _MAX_CANDIDATES = 256
 _MAX_CONTEXT_CHARS = 4096
@@ -158,7 +163,7 @@ def _read_candidates(db_path, authorized_scope=None):
         short_name=stem.split(' - ',1)[0]
         if short_name!=stem and short_name not in aliases:
             aliases.append(short_name)
-        if props['type']=='course' and stem=='课程主页' and len(Path(path).parts)>=3:
+        if props['type']=='course' and stem in {'课程主页', _course_home()} and len(Path(path).parts)>=3:
             course_name=Path(path).parent.name
             if course_name not in aliases:
                 aliases.append(course_name)

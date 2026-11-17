@@ -7,6 +7,8 @@ from datetime import datetime,timezone
 import json,re
 from orimem import journal_writer, journal_state
 from .lifecycle import sha,stamp
+from .history import evidence_roots
+from orimem import config as _config
 
 SCHEMA='''
 CREATE TABLE IF NOT EXISTS corrections(
@@ -165,7 +167,7 @@ def finish(lifecycle,correction_id,receipt_batch,scope,historical_sections=None,
             if set(resolution)!=required or resolution['path']!=t['path'] or resolution['decision'] not in {'withdrawn','replaced','source-retained'}:raise ValueError('Explicit receipt-bound primary assertion disposition required')
             proof_path=t['path']
             if retained:
-                if not t['path'].startswith('90 归档/Codex佐证/') or journal_writer.properties(body).get('type')!='codex-history':raise ValueError('Retained-source closure is only for immutable original history')
+                if not any(_config.under(t['path'], r) for r in evidence_roots()) or journal_writer.properties(body).get('type')!='codex-history':raise ValueError('Retained-source closure is only for immutable original history')
                 expected=resolution['expected_sha256']
                 bound=dict(source_key=t['source_key'],source_version=t['source_version'],path=t['path'],heading=t['heading'],claim=t['claim'],status='current',target_sha=expected)
                 if expected!=sha(raw) or t['dependency_id']!='assertion:'+sha(json.dumps(bound,ensure_ascii=False,sort_keys=True)):raise ValueError('Retained original must be byte-identical to the registered target')

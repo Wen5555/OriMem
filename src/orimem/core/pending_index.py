@@ -33,7 +33,7 @@ def binding(backend, cwd):
     # Only workspace binding is evidence of ownership; a title/keyword match
     # must never place a different project's messages into an allowed scope.
     result = resolve_task_context(backend.db, backend.vault, cwd=cwd or '',
-                                  task_query='', authorized_scope=['10 项目', '15 课程'])
+                                  task_query='', authorized_scope=__import__('orimem.config', fromlist=['x']).project_scopes())
     if result['status'] != 'matched' or result['version']['freshness'] != 'current':
         return None
     return result['entry']['path'], result['version']['current_sha256']

@@ -82,7 +82,7 @@ stage_tasks只是来源就绪检查，stage_decision只是验收；语义提炼�
 
 然后调用 `finish_correction(correction_id,receipt_batch,scope,historical_sections,direct_resolutions)`。所有依赖必须已由同一收据结案，正文与索引哈希当前一致。保留的旧结论逐节列 `historical_sections[{path,heading,text}]` 并由同一收据精确核验；不能把含其它当前主张的整节当历史吞掉。人工正文目标用 `direct_resolutions[{dependency_id,path,heading,text,decision}]`，decision为withdrawn/replaced；它仍要求旧当前断言退出原节、处置说明进入收据，不建立伪造依赖。
 
-不可改写的 `90 归档/Codex佐证` 原始会话历史目标使用decision=`source-retained`，并补 `proof_path,expected_sha256`。原文必须保持登记时的字节SHA，规范消息/归档来源已完整阅读且区间绑定当前；同一原断言必须有显式archive原文件来源门控。proof_path在同scope内，由同一writer收据核验处置段落、原版和索引；不把整段原始聊天复制进事实批次或靠删除原话结案。关闭后原版本/区间继续退出current，historical保留带纠正标注的原话，独立通用方法仍可查。
+不可改写的 `90 归档/对话佐证` 原始会话历史目标使用decision=`source-retained`，并补 `proof_path,expected_sha256`。原文必须保持登记时的字节SHA，规范消息/归档来源已完整阅读且区间绑定当前；同一原断言必须有显式archive原文件来源门控。proof_path在同scope内，由同一writer收据核验处置段落、原版和索引；不把整段原始聊天复制进事实批次或靠删除原话结案。关闭后原版本/区间继续退出current，historical保留带纠正标注的原话，独立通用方法仍可查。
 
 所有目标已经按同一收据source-retained结案时，重复finish允许证明页追加无关内容：只读核对原收据在state中的固定哈希、已committed队列与原计划postimage/段落，且当前证明段落仍在原标题、当前索引/目标字节及全部来源版本/区间仍匹配。返回idempotent=true、body_writes=0、resolution_writes=0，不新增结案行。首次/未全部结案仍要求证明页整版与收据一致；旧收据不能绕过新结案的当前回读。证明段落被改、原始来源/版本改变、收据或队列篡改、缺失旧结案行或越界均拒绝。
 

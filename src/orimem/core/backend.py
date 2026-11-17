@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from collections import OrderedDict
 import numpy as np
 from orimem import journal_state
-from .embedding import Embedder, BASE
+from .embedding import BASE, LexicalOnly, make_embedder
 from .markdown import chunks, links, lexical, metadata
 from .content_policy import local_content as sanitize
 
@@ -58,7 +58,7 @@ class Backend:
         self.vault = Path(vault).resolve()
         self.db = Path(db)
         self.db.parent.mkdir(parents=True, exist_ok=True)
-        self.embedder = embedder or Embedder()
+        self.embedder = embedder or make_embedder()
         self.lock = threading.RLock()
         self._semantic_matrix_cache = OrderedDict()
         self._semantic_matrix_cache_bytes = 0
@@ -114,12 +114,14 @@ class Backend:
             raise ValueError('Vault root is unavailable; existing index preserved')
         def scan_error(error):
             raise error
+        from orimem import config as _config
+        legacy = _config.layout_path('legacy')
         for root, dirs, files in os.walk(self.vault, followlinks=False,onerror=scan_error):
             dirs[:] = [
                 d
                 for d in dirs
                 if not d.startswith(".")
-                and (Path(root) / d).relative_to(self.vault).as_posix() != '90 归档/旧文件'
+                and (Path(root) / d).relative_to(self.vault).as_posix() != legacy
                 and not (Path(root) / d).is_symlink()
                 and not (getattr((Path(root) / d).lstat(), "st_file_attributes", 0) & 0x400)
             ]
@@ -256,7 +258,7 @@ class Backend:
                         "INSERT OR REPLACE INTO vectors VALUES(?,?,?)",
                         [(k, model, v.tobytes()) for k, v in zip(keys, vectors)],
                     )
-                    embedded += len(keys)
+                    embedded += 0 if isinstance(self.embedder, LexicalOnly) else len(keys)
                 # External editor modifications cannot be silently marked indexed.
                 if not p.exists() or digest(p.read_bytes()) != sha:
                     raise ValueError("Source changed during indexing: " + rel)
@@ -553,11 +555,16 @@ class Backend:
         if not 1 <= limit <= 12 or mode not in {"hybrid", "lexical", "semantic"}:
             raise ValueError("Invalid retrieval options")
         query_text = sanitize(query)
+        degraded = isinstance(self.embedder, LexicalOnly)
+        if degraded:
+            mode = "lexical"
         with self.lock, self.connect() as c:
             from .retrieval_policy import Policy
             policy=Policy(self,c,time_intent)
             model = c.execute("SELECT value FROM meta WHERE key='model'").fetchone()
             if not model or model[0] != self.embedder.model_id:
+                if degraded:
+                    raise ValueError("Index was built for another recall mode; run `orimem sync`")
                 from .embedding import choose_backend
                 try:
                     choose_backend(Path(getattr(self.embedder, "path", "")))

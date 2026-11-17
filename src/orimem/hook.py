@@ -25,6 +25,9 @@ from orimem import config
 ASK_DAILY = ('OriMem：每日总结开关尚未设置（daily_summary.enabled = "ask"）。请在本次会话的合适时机简短询问用户一次'
              '是否开启每日自动总结（默认关闭，可设定时间），按回答调用 `config_set`（true 或 false）记录；'
              '用户未回答前视为关闭，不要反复追问。')
+ASK_DAILY_EN = ('OriMem: the daily summary switch is not set yet (daily_summary.enabled = "ask"). At a suitable moment in '
+                'this session ask the user once whether to turn on the automatic daily summary (off by default; a time can be '
+                'set) and record the answer with `config_set` (true or false). Treat it as off until answered; do not ask again.')
 SESSION_PREFIX = {'claude': 'claude-', 'dsh': 'dsh-'}
 
 
@@ -92,6 +95,12 @@ def handle(event: dict, agent: str) -> dict:
     name = event.get('hook_event_name')
     output: dict = {}
     session = event.get('session_id') if isinstance(event.get('session_id'), str) and event.get('session_id') else None
+    source = event.get('source')
+    if config.get('capture.enabled', True) and agent in (config.get('capture.sources') or []):
+        # Hand the session to the background service first: the hook never waits for capture.
+        if name == 'Stop' or (name == 'SessionStart' and source in ('resume', 'compact')):
+            transcript = event.get('transcript_path')
+            request_capture(agent, session, transcript if isinstance(transcript, str) and transcript else None)
     if name in ('SessionStart', 'UserPromptSubmit', 'Stop') and session:
         from orimem import hook_entry
         shared = {k: v for k, v in event.items() if k not in ('transcript_path', 'last_assistant_message')}
@@ -102,12 +111,8 @@ def handle(event: dict, agent: str) -> dict:
             output = {}
     if name == 'SessionStart' and config.get('daily_summary.enabled') == 'ask':
         spec = output.setdefault('hookSpecificOutput', dict(hookEventName=name))
-        spec['additionalContext'] = (spec.get('additionalContext', '') + '\n' + ASK_DAILY).strip()
-    source = event.get('source')
-    if config.get('capture.enabled', True) and agent in (config.get('capture.sources') or []):
-        if name == 'Stop' or (name == 'SessionStart' and source in ('resume', 'compact')):
-            transcript = event.get('transcript_path')
-            request_capture(agent, session, transcript if isinstance(transcript, str) and transcript else None)
+        ask = ASK_DAILY if config.layout()['language'] == 'zh' else ASK_DAILY_EN
+        spec['additionalContext'] = (spec.get('additionalContext', '') + '\n' + ask).strip()
     return output
 
 

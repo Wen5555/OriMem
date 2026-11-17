@@ -46,7 +46,7 @@ orimem --home D:/orimem-test/home install --agent claude
 |---|---|---|
 | MCP | 新开会话，问“测试项目下一步是什么” | 调用 `mcp__orimem__task_context` 或 `recall`，回答“给导出功能加进度条” |
 | 每日询问 | 新开会话 | agent 在会话中问一次是否开启每日总结；回答后 `orimem --home … config get daily_summary` 显示 `true` 或 `false` |
-| Stop 钩子采集 | 对话一轮后结束回合，等 5 秒 | `D:/orimem-test/home/sources/capture-log.jsonl` 出现一条 `"claude": {"scanned": 1, "captured": 1 …}`；`vault/90 归档/Codex佐证/<月份>/claude-<会话ID>-continuous.md` 出现 |
+| Stop 钩子采集 | 对话一轮后结束回合，等 5 秒 | `D:/orimem-test/home/sources/capture-log.jsonl` 出现一条 `"claude": {"scanned": 1, "captured": 1 …}`；`vault/90 归档/对话佐证/<月份>/claude-<会话ID>-continuous.md` 出现 |
 | 不采集的内容 | 打开上面那份转录 | 里面没有工具输出、思考过程和 `<system-reminder>` 之类的注入文本 |
 
 ```bash

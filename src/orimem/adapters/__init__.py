@@ -119,6 +119,11 @@ def merge_hooks(data: dict, agent: str, windows_key: bool = False) -> dict:
         groups = [g for g in hooks.get(event, []) if not any(_is_ours(h) for h in g.get('hooks', []))]
         entry = dict(type='command', command=hook_command(agent), timeout=20 if event == 'SessionStart' else 10,
                      statusMessage='OriMem')
+        if event == 'Stop' and agent != 'dsh':
+            # Capture only hands the session to the background service: never block the turn on it.
+            # (Claude Code and Codex honor "async"; dsh's hook bridge runs every hook synchronously.)
+            entry.update(timeout=30, **{'async': True})
+            del entry['statusMessage']
         if windows_key:
             entry['commandWindows'] = hook_command(agent, 'powershell')
         groups.append(dict(hooks=[entry]))

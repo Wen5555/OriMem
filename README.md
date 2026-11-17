@@ -48,7 +48,17 @@ irm https://raw.githubusercontent.com/Wen5555/OriMem/main/scripts/install.ps1 | 
 curl -LsSf https://raw.githubusercontent.com/Wen5555/OriMem/main/scripts/install.sh | sh
 ```
 
-The installer sets up [uv](https://github.com/astral-sh/uv) if needed, installs OriMem into an isolated environment (about 120 MB, Python provided by uv), then runs `orimem init`. `init` asks three questions — vault path, conversation capture (default on), daily summary (default "ask me later") — downloads the 470 MB embedding model, and connects every agent it finds. Restart your agents afterwards.
+The installer sets up [uv](https://github.com/astral-sh/uv) if needed, installs OriMem into an isolated environment (about 130 MB, Python provided by uv), then runs `orimem init`. `init` asks a few questions — vault path, folder language (Chinese or English, from your system locale), conversation capture (default on), daily summary (default "ask me later") — downloads the 490 MB embedding model, and connects every agent it finds. Restart your agents afterwards.
+
+No Obsidian yet? Not required: the vault is a plain Markdown folder. `init` prepares it for a good first open (welcome note, new notes to the inbox, daily notes to the daily folder) and tells you how to install or add it; `orimem open` opens it later. Short on disk or offline? `orimem init --lexical` skips the model and uses full-text search only (switch back any time with `orimem config set recall.mode hybrid`).
+
+| What | Size |
+|---|---|
+| OriMem environment (onnxruntime, numpy, tokenizers, …) | ~130 MB |
+| Embedding model (`model.onnx` + tokenizer) | ~490 MB (none with `--lexical`) |
+| uv + Python 3.12, only if not already installed | ~70 MB + ~70 MB |
+| **Typical total** | **~0.6 GB** (~0.75 GB on a bare machine; ~0.13 GB lexical-only) |
+| Optional PyTorch backend (`orimem-mcp[torch]`) | +1 GB or more |
 
 Then just talk to your agent:
 
@@ -116,7 +126,7 @@ flowchart LR
 
 - **Recall:** `task_context` binds the current project; `recall` returns ranked snippets; `evidence` fetches exact source text with offsets and hashes.
 - **Write-back:** the agent proposes a complete note change; OriMem checks the expected hash, backs up, writes, re-reads, verifies the claimed text and issues a receipt.
-- **Capture:** per-agent parsers mirror ordinary user/assistant turns into one pipeline, which stages them and projects stable transcript notes under `90 归档/Codex佐证/`. Hooks hand the work to the running service (falling back to a detached capture process), so they also work inside sandboxed hook runners such as dsh's.
+- **Capture:** per-agent parsers mirror ordinary user/assistant turns into one pipeline, which stages them and projects stable transcript notes into the vault's evidence folder. The Stop hook only hands the session to the running service (falling back to a detached capture process) and is registered as `async` for Claude Code and Codex, so it never delays a turn; dsh runs hooks synchronously, where it returns in a fraction of a second. Context hooks (session start, prompt submit) stay synchronous because their output is the injected project context. Every parse records the client/format version and checks the transcript shape; unsupported formats are not captured and drift shows up in `orimem doctor`.
 
 ## Configuration
 
@@ -132,7 +142,13 @@ Settings live in `~/.orimem/config.toml`. Change them with `orimem config set <k
 | `daily_summary.enabled` | `"ask"` | `"ask"` = ask once, off until answered · `true` · `false` |
 | `daily_summary.time` | `"22:30"` | When the daily job runs |
 | `daily_summary.agent` | auto | `claude` or `codex` runs the summary |
+| `recall.mode` | `"hybrid"` | `hybrid` = vectors + full text (needs the model) · `lexical` = full text and links only, no model |
 | `recall.hf_endpoint` | auto | Model download endpoint (falls back to hf-mirror.com) |
+| `mcp.tools` | `"core"` | `core` publishes 8 everyday tools · `all` adds the advanced ones |
+| `mcp.extra` | `[]` | With `core`: individual advanced tools to publish, e.g. `["health"]` |
+| `layout.language` | system locale | `zh` or `en` folder preset |
+| `layout.<role>` | preset | Override one folder: `inbox`, `drafts`, `projects`, `courses`, `areas`, `knowledge`, `daily`, `weekly`, `archive`, `evidence`, `legacy`, `workspace`; also `course_home`, `weekly_note`, `knowledge_index` |
+| `layout.extra_writable` | `[]` | Further folders automatic write-back may touch |
 
 ## Reference
 
@@ -143,7 +159,9 @@ Settings live in `~/.orimem/config.toml`. Change them with `orimem config set <k
 |---|---|
 | `orimem init [-y]` | First-time setup |
 | `orimem install / uninstall [--agent claude,codex,dsh] [--dsh-profile NAME]` | Connect or disconnect agents |
-| `orimem doctor` | Check config, model, embedder, dependencies and agents |
+| `orimem init [-y] [--lang zh\|en] [--lexical]` | (re)run setup with a folder language / without the model |
+| `orimem doctor` | Check config, model, embedder, layout, Obsidian, transcript formats, dependencies and agents |
+| `orimem open` | Open the vault in Obsidian (or say how to install/add it) |
 | `orimem capture [--source X] [--session ID] [--backfill]` | Capture now |
 | `orimem sync` · `orimem recall "query" --scope "10 项目"` | Index / search from the shell |
 | `orimem daily status / run [--dry-run] / apply` | Daily summary |
@@ -156,36 +174,53 @@ Settings live in `~/.orimem/config.toml`. Change them with `orimem config set <k
 <details>
 <summary><b>MCP tools</b></summary>
 
+Published by default (8):
+
 | Tool | Purpose |
 |---|---|
 | `task_context` | Bind the current folder/task to a project entry |
-| `recall` | Hybrid search (snippets) |
+| `recall` | Hybrid (or lexical) search, snippets |
 | `evidence` | Exact source text for result ids |
 | `list_sessions` · `get_session_messages` | Browse captured conversations |
 | `prepare_record` · `commit_record` | Verified write-back |
-| `initialize` | Create a project/course entry |
+| `config_set` | Record a setting the user decided (e.g. the daily summary) |
+
+Advanced (`orimem config set mcp.tools all`, or list some in `mcp.extra`):
+
+| Tool | Purpose |
+|---|---|
+| `initialize` | Create a project/course entry with a workspace binding |
 | `lifecycle` | Source reading, candidates, corrections |
 | `health` · `sync` · `archive_history` | Maintenance |
-| `config_get` · `config_set` · `capture_now` | Settings and capture |
+| `config_get` · `capture_now` | Read settings, capture now |
 </details>
 
 <details>
 <summary><b>Vault layout</b></summary>
 
+`init` picks the Chinese or English preset from your locale (`--lang` to choose); every folder can be renamed with `orimem config set layout.<role> "<path>"` (existing notes are not moved). `orimem config get layout` shows the resolved layout.
+
 ```text
-00 收件箱/   inbox and knowledge candidates
-10 项目/     one page per project (status, next action)
-15 课程/     courses
-30 知识/     reusable knowledge
-50 日记/     每日/ (daily) · 每周/ (weekly)
-90 归档/     archive; 90 归档/Codex佐证/ holds captured transcripts
-95 AI 工作区/ agent work notes
+English preset                    Chinese preset
+00 Inbox/ (AI Drafts/)            00 收件箱/ (AI 草稿/)      inbox, knowledge candidates
+10 Projects/                      10 项目/                   one page per project
+15 Courses/<course>/Course Home   15 课程/<课程>/课程主页
+30 Knowledge/                     30 知识/                   reusable knowledge
+50 Journal/Daily · Weekly         50 日记/每日 · 每周
+90 Archive/Conversations/         90 归档/对话佐证/          captured transcripts
+95 AI Workspace/                  95 AI 工作区/              agent work notes
 ```
 
-Writes are limited to `layout.folders`. `.obsidian` and files outside the vault are never read or modified.
+Automatic writes are limited to projects, courses (homepage only), knowledge, daily/weekly journals, AI drafts, the AI workspace and the evidence folder (plus `layout.extra_writable`). `.obsidian` is only written once, when `init` creates a vault Obsidian has never opened; files outside the vault are never touched. Vaults set up by 0.1.x keep `90 归档/Codex佐证`.
 </details>
 
 ## FAQ
+
+**Do I need Obsidian?** No. Agents read and write the Markdown folder directly; Obsidian is the optional UI. `orimem doctor` shows whether it is installed and whether the vault is added.
+
+**Can I run without the embedding model?** Yes: `orimem config set recall.mode lexical` (or `init --lexical`). Recall then uses SQLite full-text search and links only; set `hybrid` and run `orimem model download` + `orimem sync` to get vectors back.
+
+**Do the hooks slow my agent down?** Capture runs in the background (`async` Stop hook in Claude Code and Codex). The session-start and prompt hooks take about a quarter of a second because they inject project context.
 
 **Do I need a GPU or PyTorch?** No. Embeddings run on CPU through ONNX Runtime. `orimem[torch]` plus `orimem model download --torch` enables the optional PyTorch backend, which produces identical vectors.
 
@@ -199,7 +234,8 @@ Writes are limited to `layout.folders`. `.obsidian` and files outside the vault 
 
 ## Roadmap
 
-- [ ] Configurable / English vault layout
+- [x] Configurable / English vault layout
+- [x] Full-text-only mode without the model
 - [ ] More agents (Cursor, Gemini CLI, OpenCode)
 - [ ] Optional quantized ONNX model for low-memory machines
 

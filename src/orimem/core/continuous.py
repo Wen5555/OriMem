@@ -174,8 +174,17 @@ def project(backend, limit=8):
                     c.execute('BEGIN IMMEDIATE')
                     live = c.execute('SELECT * FROM lifecycle_jobs WHERE id=?',(job['id'],)).fetchone()
                     latest = c.execute('SELECT snapshot_sha FROM capture_sessions WHERE session_id=?',(job['subject'],)).fetchone()
-                    if live['state'] != 'running' or live['owner'] != owner or live['lease_until'] < now() or latest[0] != job['version']:
-                        raise ValueError('Source or projection lease changed during writer commit')
+                    current = live['state'] == 'running' and live['owner'] == owner and live['lease_until'] >= now() and latest[0] == job['version']
+                    if not current:
+                        # The writer already replaced the file and verified its
+                        # receipt. A newer observation (or lease loss) arriving
+                        # now must not leave that output unregistered, or every
+                        # later projection and vault sync reads our own write
+                        # as a manual edit. Register it only while the file
+                        # still holds exactly these bytes (checked under the
+                        # write lock); anything else stays a preserved conflict.
+                        if not path.exists() or digest(path.read_bytes()) != digest(output):
+                            raise ValueError('Source or projection lease changed during writer commit')
                     c.execute('INSERT OR REPLACE INTO source_projections VALUES(?,?,?,?,?,?,?)',
                               (job['subject'],session['path'],job['version'],digest(block),digest(output),str(receipt_path),now()))
                     # A newer verified projection replaces an older derived
@@ -186,8 +195,14 @@ def project(backend, limit=8):
                         expected=json.loads(old_job['payload']).get('notes',{})
                         if old_job['subject']!=batch and set(expected)=={session['path']}:
                             c.execute("UPDATE lifecycle_jobs SET state='superseded',owner=NULL,lease_until=NULL,error='Newer verified continuous projection',updated_at=? WHERE id=?",(now(),old_job['id']))
-                    c.execute("UPDATE lifecycle_jobs SET state='complete',owner=NULL,lease_until=NULL,error=NULL,updated_at=? WHERE id=?",(now(),job['id']))
-                results.append(dict(session_id=job['subject'],version=job['version'],path=session['path'],receipt=str(receipt_path),written=result['written']))
+                    if current or (live['state'] == 'running' and live['owner'] == owner and latest[0] == job['version']):
+                        c.execute("UPDATE lifecycle_jobs SET state='complete',owner=NULL,lease_until=NULL,error=NULL,updated_at=? WHERE id=?",(now(),job['id']))
+                    elif live['state'] == 'running' and live['owner'] == owner:
+                        c.execute("UPDATE lifecycle_jobs SET state='superseded',owner=NULL,lease_until=NULL,error='New source observation after verified write',updated_at=? WHERE id=?",(now(),job['id']))
+                    # Otherwise observe() already superseded it, or another
+                    # owner holds it; leave that job state untouched.
+                results.append(dict(session_id=job['subject'],version=job['version'],path=session['path'],receipt=str(receipt_path),written=result['written'],
+                                    superseded_after_write=not current))
         except Exception as error:
             try:
                 backend.lifecycle.finish_job(job['id'],owner,error=str(error))

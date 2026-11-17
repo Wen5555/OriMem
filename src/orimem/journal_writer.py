@@ -8,7 +8,6 @@ import re
 import uuid
 from orimem import journal_state as state
 from orimem import config as _config
-ALLOWED_FOLDERS = _config.folders()
 # Machine-specific one-off maintenance authorizations are not shipped; they stay empty.
 ARCHIVE_REFERENCE_NOTES = set()
 LEGACY_REFERENCE_NOTES = set()
@@ -81,7 +80,7 @@ def validate_archive_references(path, content, root):
         for position,link in enumerate(links):
             target = link.split('|',1)[0].rstrip('\\')
             note, marker, heading = target.partition('#')
-            if not marker or not heading or not note.startswith('90 归档/Codex佐证/'):
+            if not marker or not heading or not _config.under(note, _config.layout_path('evidence')):
                 raise ValueError('Archive replacements require a precise Codex evidence heading.')
             annotation = re.search(suffix, labels[position])
             current_event = re.match(r'^(\d+) · ', heading)
@@ -197,7 +196,7 @@ def validate_plan(plan, root, authorized_control_notes=(), authorized_area_notes
         raise ValueError('Only the explicitly authorized old-draft transfer and two reference notes are supported')
     if set(authorized_control_notes) - {'AGENTS.md'}:
         raise ValueError('Only the explicitly authorized vault AGENTS control note is supported.')
-    if set(authorized_area_notes) - {'20 长期领域/科研.md','20 长期领域/学业.md'}:
+    if any(not _config.under(n, _config.layout_path('areas')) for n in authorized_area_notes):
         raise ValueError('Only explicitly selected research/study area entry maintenance is supported.')
     if set(authorized_archive_reference_notes) - ARCHIVE_REFERENCE_NOTES:
         raise ValueError('Only the explicitly selected legacy snapshots support reference maintenance.')
@@ -256,18 +255,19 @@ def validate_plan(plan, root, authorized_control_notes=(), authorized_area_notes
         path = state.note_path(change["path"], root)
         parts = path.relative_to(root).parts
         control = change['path'] in authorized_control_notes and parts == ('AGENTS.md',)
-        area = change['path'] in authorized_area_notes and len(parts)==2 and parts[0]=='20 长期领域'
+        lay = _config.layout()
+        rel = '/'.join(parts)
+        area = change['path'] in authorized_area_notes and _config.under(rel, lay['areas']) and len(parts) == len(lay['areas'].split('/'))+1
         archive_reference = change['path'] in {*authorized_archive_reference_notes,*authorized_legacy_reference_notes}
         retirement=change['path'] in authorized_legacy_retirement_notes
         navigation=change['path'] in authorized_navigation_notes
         cleanup=change['path'] in authorized_legacy_cleanup_notes
         maintenance=archive_reference or retirement or navigation or cleanup
-        if (parts[0] not in ALLOWED_FOLDERS and not control and not area and not maintenance) or (parts[0] == "00 收件箱" and parts[1:2] != ("AI 草稿",) and not maintenance):
-            raise ValueError("Automatic writes are limited to projects, journals, drafts and AI workspace.")
-        if parts[0] == '15 课程' and (len(parts)!=3 or parts[-1]!='课程主页.md'):
+        if not any(_config.under(rel, folder) for folder in _config.writable()) and not control and not area and not maintenance:
+            raise ValueError("Automatic writes are limited to projects, courses, knowledge, daily/weekly journals, "
+                             "AI drafts, the AI workspace and conversation evidence (see `orimem config get layout`).")
+        if _config.under(rel, lay['courses']) and (len(parts) != len(lay['courses'].split('/'))+2 or parts[-1] != lay['course_home']+'.md'):
             raise ValueError('Automatic course writes are limited to the course homepage; original materials are protected.')
-        if parts[0] == '90 归档' and parts[1:2] != ('Codex佐证',) and not maintenance:
-            raise ValueError('Evidence archive writes are restricted to 90 归档/Codex佐证.')
         if cleanup:
             validate_cleanup(path,change['content'],root)
         if archive_reference:
@@ -278,7 +278,7 @@ def validate_plan(plan, root, authorized_control_notes=(), authorized_area_notes
             if change['expected_sha256'] is None or not path.is_file():raise ValueError('Legacy maintenance cannot create or remove notes')
             if retirement:validate_legacy_retirement(path,change['content'],plan['through'])
             if navigation:validate_legacy_navigation(path,change['content'])
-        if parts[0] == "50 日记" and parts[1:2] not in {("每日",), ("每周",)}:
+        if _config.under(rel, lay['journal']) and not (_config.under(rel, lay['daily']) or _config.under(rel, lay['weekly'])):
             if not cleanup:
                 raise ValueError("Journals belong in the daily or weekly subfolder.")
         if path in paths:
@@ -326,7 +326,7 @@ def apply_plan(plan, state_path=state.DEFAULT, root=state.ROOT, authorized_contr
                 week = plan.get("week")
                 if not week or not state.weekly_ready(current, week, **(plan.get('period') or {}))["ready"]:
                     raise ValueError("Daily prerequisite for this weekly summary has not succeeded.")
-                expected_week = "50 日记/每周/" + week + " 周复盘.md"
+                expected_week = _config.weekly_note(week)
                 if not any(c["path"].replace("\\", "/") == expected_week for _, c, _ in checked):
                     raise ValueError("Weekly receipt must verify the matching weekly note.")
             # Check ALL originals before changing ANY notes.

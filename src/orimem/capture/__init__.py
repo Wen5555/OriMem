@@ -6,7 +6,11 @@ from datetime import datetime
 from pathlib import Path
 
 from orimem import config
-from orimem.capture import common
+from orimem.capture import common, formats
+
+
+def format_report() -> dict:
+    return formats.report()
 
 SOURCES = ('claude', 'codex', 'dsh')
 
@@ -93,6 +97,9 @@ def collect(sources=None, backfill: bool = False, project: bool = True, only_pat
                     common.log(dict(op='capture', source=name, path=key, error=type(error).__name__ + ': ' + str(error)[:300]))
                     continue
                 seen[key] = mtime
+                formats.record(name, key, result.get('format'))
+                if (result.get('format') or {}).get('warnings'):
+                    report['format_warnings'] = report.get('format_warnings', 0) + 1
                 report['captured' if result.get('captured') else 'excluded'] += 1
             if report['captured'] or report['excluded']:
                 backend = backend or common.capture_backend()

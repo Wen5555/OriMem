@@ -15,7 +15,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from orimem import config
-from orimem.capture import common
+import re
+
+from orimem.capture import common, formats
 
 NAME = 'dsh'
 NAMESPACE = 'dsh-session-adapter-v1'
@@ -75,7 +77,8 @@ def _text(message) -> str:
 
 
 def parse(path: Path):
-    stats = dict(lines=0, invalid=0, kept=0, skipped=0)
+    stats = dict(lines=0, invalid=0, kept=0, skipped=0, messages=0, malformed=0)
+    types = set()
     header, surface = {}, []          # surface: list of (seq, event-dict or None)
     for line_no, line in enumerate(_lines(path), 1):
         stats['lines'] += 1
@@ -84,6 +87,7 @@ def parse(path: Path):
         except ValueError:
             stats['invalid'] += 1
             continue
+        types.add(r.get('type'))
         if r.get('type') == 'session' and not header:
             header = r
             continue
@@ -104,6 +108,9 @@ def parse(path: Path):
             message, role = data.get('message') if isinstance(data.get('message'), dict) else {}, 'assistant'
         else:
             continue
+        stats['messages'] += 1
+        if not isinstance(message, dict) or not isinstance(message.get('content'), list):
+            stats['malformed'] += 1
         message = message or {}
         body = _text(message)
         ts = _iso(r.get('time'))
@@ -131,6 +138,11 @@ def parse(path: Path):
     session = dict(title=first[:180], cwd=header.get('cwd') or '', first_user_message=first,
                    cli_version=str(header.get('version') or ''), id=header.get('id'),
                    delegated=bool(header.get('delegationDepth')), seeded=seeded)
+    named = re.match(r'session\.v(\d+)\.', Path(path).name)
+    version = header.get('version') or (named.group(1) if named else '')
+    session['format'] = formats.assess(NAME, version, header_ok=bool(header), messages=stats['messages'],
+                                       malformed=stats['malformed'], invalid=stats['invalid'],
+                                       lines=stats['lines'], types=types)
     return session, events, stats
 
 
@@ -141,6 +153,9 @@ def capture_file(path: Path) -> dict:
     sid = PREFIX + str(ident).removeprefix('session-')
     db = common.adapter_db(NAME)
     reason = None
+    if session['format']['status'] == 'unsupported':
+        # Keep whatever an earlier, supported version mirrored; never guess at a new format.
+        return dict(captured=False, session_id=sid, reason=session['format']['warnings'][0], format=session['format'])
     if session['delegated']:
         reason = 'subagent (delegated) session excluded'
     elif common.excluded_cwd(session['cwd']):
@@ -149,5 +164,7 @@ def capture_file(path: Path) -> dict:
         reason = 'no ordinary messages observed yet'
     if reason:
         common.forget_session(db, sid)
-        return dict(captured=False, session_id=sid, reason=reason)
-    return common.write_session(db, sid, path, session, events, stats, 'dsh', 'deepseek-compatible')
+        return dict(captured=False, session_id=sid, reason=reason, format=session['format'])
+    result = common.write_session(db, sid, path, session, events, stats, 'dsh', 'deepseek-compatible')
+    result['format'] = session['format']
+    return result

@@ -42,6 +42,8 @@ def test_claude_install_uninstall_roundtrip(env):
     assert 'error' not in out['claude'], out
     data = json.loads(settings.read_text(encoding='utf-8'))
     assert len(data['hooks']['Stop']) == 2 and 'SessionStart' in data['hooks']
+    assert data['hooks']['Stop'][-1]['hooks'][0]['async'] is True          # capture never blocks the turn
+    assert 'async' not in data['hooks']['UserPromptSubmit'][-1]['hooks'][0]  # context injection stays synchronous
     state = json.loads((env['home'] / '.claude.json').read_text(encoding='utf-8'))
     assert state['mcpServers']['orimem']['args'][-1] == 'mcp'
     assert (env['home'] / '.claude' / 'skills' / 'orimem' / 'SKILL.md').exists()
@@ -66,6 +68,7 @@ def test_codex_install_uninstall_roundtrip(env):
     assert parsed['mcp_servers']['orimem']['args'][-1] == 'mcp' and 'other' in parsed['mcp_servers']
     hooks = json.loads((env['home'] / '.codex' / 'hooks.json').read_text(encoding='utf-8'))
     assert 'commandWindows' in hooks['hooks']['Stop'][0]['hooks'][0]
+    assert hooks['hooks']['Stop'][0]['hooks'][0]['async'] is True
     adapters.install(['codex'])
     assert cfg.read_text(encoding='utf-8').count('[mcp_servers.orimem]') == 1
     adapters.uninstall(['codex'])
@@ -91,6 +94,7 @@ def test_dsh_install_uninstall_roundtrip(env):
         assert inserted[0]['config']['args'][-1] == 'mcp'
     hooks_file = json.loads((env['tmp'] / 'orimem' / 'dsh-hooks.json').read_text(encoding='utf-8'))
     assert '--agent dsh' in hooks_file['hooks']['Stop'][0]['hooks'][0]['command']
+    assert 'async' not in hooks_file['hooks']['Stop'][0]['hooks'][0]   # dsh runs hooks synchronously
     assert (env['home'] / '.dsh' / 'skills' / 'orimem' / 'SKILL.md').exists()
     adapters.uninstall(['dsh'])
     assert (profile / 'cordis.patch.yml').read_bytes() == original.encode('utf-8')   # byte-identical, LF kept
@@ -122,7 +126,7 @@ def test_cli_output_survives_non_utf8_pipe(env, tmp_path):
     import os, subprocess, sys
     environment = dict(os.environ, PYTHONIOENCODING='cp1252', PYTHONUTF8='0',
                        PYTHONPATH=str(__import__('conftest').SRC))
-    result = subprocess.run([sys.executable, '-m', 'orimem', 'config', 'get', 'layout.folders'],
+    result = subprocess.run([sys.executable, '-m', 'orimem', 'config', 'get', 'layout.inbox'],
                             capture_output=True, env=environment)
     assert result.returncode == 0, result.stderr
     assert '收件箱' in result.stdout.decode('utf-8')
@@ -184,6 +188,8 @@ def test_mcp_server_starts_without_embedding_model(env):
     """A missing model must not take the server down: settings, capture and health keep working."""
     import os, subprocess, sys
     from conftest import SRC
+    from orimem import config
+    config.set_value('mcp.extra', ['config_get'])
     requests = [
         dict(jsonrpc='2.0', id=1, method='initialize', params={}),
         dict(jsonrpc='2.0', id=2, method='tools/list', params={}),
@@ -196,6 +202,8 @@ def test_mcp_server_starts_without_embedding_model(env):
                             capture_output=True, text=True, encoding='utf-8', env=environment, timeout=120)
     replies = {r['id']: r for r in map(json.loads, result.stdout.splitlines())}
     assert replies[1]['result']['serverInfo']['name'] == 'orimem', result.stderr
-    assert any(t['name'] == 'capture_now' for t in replies[2]['result']['tools'])
+    from orimem.core.mcp_server import CORE_TOOLS
+    assert {t['name'] for t in replies[2]['result']['tools']} == set(CORE_TOOLS) | {'config_get'}
+    assert 'capture_now' in replies[1]['result']['instructions']   # hidden advanced tools are named
     assert replies[3]['result']['content'][0]['text'] == 'true'
     assert 'model download' in replies[4]['error']['message']

@@ -23,6 +23,19 @@ WRITE = dict(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
 SETTABLE = {"capture.enabled", "capture.sources", "capture.exclude_cwd",
             "daily_summary.enabled", "daily_summary.time", "daily_summary.agent"}
 LOCAL_TOOLS = {"config_get", "config_set", "capture_now"}
+# Published by default: everyday recall, evidence, write-back, history and the one-time setting question.
+CORE_TOOLS = ("task_context", "recall", "evidence", "prepare_record", "commit_record",
+              "list_sessions", "get_session_messages", "config_set")
+# Maintenance and lifecycle tools: `orimem config set mcp.tools all`, or list some in mcp.extra.
+ADVANCED_TOOLS = ("initialize", "lifecycle", "health", "sync", "archive_history", "config_get", "capture_now")
+
+
+def published_names():
+    from orimem import config
+    if str(config.get("mcp.tools") or "core") == "all":
+        return set(CORE_TOOLS) | set(ADVANCED_TOOLS)
+    extra = {str(x) for x in (config.get("mcp.extra") or [])} & set(ADVANCED_TOOLS)
+    return set(CORE_TOOLS) | extra
 
 
 BASE_INSTRUCTIONS = ("OriMem: local Obsidian vault memory. Use task_context/recall for short results first, evidence only when needed; "
@@ -31,9 +44,25 @@ ASK_DAILY = ("OriMem 设置提示：每日自动总结尚未设置（daily_summa
              "（默认关闭，可指定 HH:MM 时间），按回答调用 config_set 记录 true 或 false；用户未回答前视为关闭，不要反复追问。")
 
 
+ASK_DAILY_EN = ("OriMem setup: the daily summary is not decided yet (daily_summary.enabled = \"ask\"). At a suitable moment in this "
+                "session ask the user once whether to turn on the automatic daily summary (off by default; a HH:MM time can be set) and "
+                "record the answer with config_set (true or false). Treat it as off until answered; do not ask again.")
+
+
 def server_instructions():
     from orimem import config
     text = BASE_INSTRUCTIONS
+    lay = config.layout()
+    text += ("\nVault layout (relative folders): projects=%(projects)s, courses=%(courses)s (homepage %(course_home)s.md), "
+             "knowledge=%(knowledge)s, drafts=%(drafts)s, daily=%(daily)s/YYYY-MM-DD.md, weekly=%(weekly)s, "
+             "evidence=%(evidence)s." % lay)
+    if str(config.get("recall.mode") or "hybrid") == "lexical":
+        text += "\nrecall runs in lexical (full-text only) mode: no embedding model; use concrete keywords."
+    hidden = sorted(set(ADVANCED_TOOLS) - published_names())
+    if hidden:
+        text += ("\nAdvanced tools not published here: " + ", ".join(hidden) +
+                 " (the user can enable them with `orimem config set mcp.tools all`; CLI equivalents: "
+                 "`orimem health`, `orimem sync`, `orimem capture`).")
     if config.get("daily_summary.enabled") == "ask":
         text += "\n" + ASK_DAILY
     return text
@@ -161,7 +190,7 @@ TOOLS = [
     ),
     dict(
         name="archive_history",
-        description="Explicit legacy snapshot archive under 90 归档/Codex佐证; ordinary continuous projection is independent. Does not infer knowledge or project status.",
+        description="Explicit legacy snapshot archive into the vault evidence folder; ordinary continuous projection is independent. Does not infer knowledge or project status.",
         annotations=WRITE,
         inputSchema=obj(
             dict(
@@ -287,11 +316,8 @@ def serve(backend, watch=False, collect=False, compat=False, dispatcher=None):
         from .watcher import Watcher
 
         watcher = Watcher(backend, collect=collect).start()
-    published = (
-        [t for t in TOOLS if t["name"] in {"list_sessions", "get_session_messages"}]
-        if compat
-        else TOOLS
-    )
+    names = {"list_sessions", "get_session_messages"} if compat else published_names()
+    published = [t for t in TOOLS if t["name"] in names]
     try:
         for line in sys.stdin:
             if len(line) > 2_500_000:

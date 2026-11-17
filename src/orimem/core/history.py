@@ -5,6 +5,12 @@ import json, base64, os, sqlite3
 from .backend import normalized_cwd, digest
 from .migration import epoch
 from .content_policy import local_content as sanitize
+from orimem import config as _config
+
+
+def evidence_roots():
+    # Current layout plus the 0.1.x folder, so earlier projections stay readable.
+    return {_config.layout_path('evidence'), _config.LEGACY_EVIDENCE}
 
 
 def continuous_storage(backend,c,session_id):
@@ -38,7 +44,7 @@ def _continuous_storage(backend,c,session_id):
     prior=c.execute('SELECT records FROM capture_snapshots WHERE session_id=? AND version=?',(session_id,projection['snapshot_sha'])).fetchone()
     if prior:projected={int(i):v for i,v in json.loads(prior[0])}
     try:
-        if not projection['path'].startswith('90 归档/Codex佐证/'):raise ValueError('Projection is outside authorized evidence')
+        if not projection['path'].startswith(tuple(p+'/' for p in evidence_roots())):raise ValueError('Projection is outside authorized evidence')
         from .continuous import managed
         _,_,body=managed(backend.path(projection['path']).read_text(encoding='utf-8-sig'))
         integrity=digest(body)==projection['managed_sha']

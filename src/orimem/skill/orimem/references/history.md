@@ -1,10 +1,10 @@
 # 归档佐证与本地暂存来源
 
-普通历史材料进入 `90 归档/Codex佐证`，正文、摘要和工具活动元数据带会话与事件出处；未审阅内容不自动转成成果、承诺、下一步或项目状态。原始工具载荷、审查、子代理和第三方名单材料保留在原来源，不进入知识正文。
+普通历史材料进入 `90 归档/对话佐证`，正文、摘要和工具活动元数据带会话与事件出处；未审阅内容不自动转成成果、承诺、下一步或项目状态。原始工具载荷、审查、子代理和第三方名单材料保留在原来源，不进入知识正文。
 
 ## 主题补证
 
-先查当前知识；仍有缺口时用 `recall`(query, scope=["90 归档/Codex佐证"], include_history=true)，按返回的具体笔记缩小范围，用 `evidence` 取分块。长对话已分块，不生成大段 startup context。
+先查当前知识；仍有缺口时用 `recall`(query, scope=["90 归档/对话佐证"], include_history=true)，按返回的具体笔记缩小范围，用 `evidence` 取分块。长对话已分块，不生成大段 startup context。
 
 ## 日周扫描与分页
 
@@ -28,9 +28,9 @@
 
 本地保存按原文保留内容，正文与向量不做额外脱敏；凭据、第三方名单和来源授权边界仍有效。旧替换标记与截断按原样保留，不扫描原始JSONL恢复。
 
-先根据待归纳主题读取当前知识和必要消息，提炼事实与经验。普通对话的持续保存不要求调用归档工具；`archive_history`(session_ids) 保留为既有旧快照的明确归档兼容操作，每次最多12个会话，经共享 writer 写入 `90 归档/Codex佐证/YYYY-MM/`，再更新索引。不要用全量迁移替代持续 projection 或语义整理；普通自动日记不例行复制整段聊天。
+先根据待归纳主题读取当前知识和必要消息，提炼事实与经验。普通对话的持续保存不要求调用归档工具；`archive_history`(session_ids) 保留为既有旧快照的明确归档兼容操作，每次最多12个会话，经共享 writer 写入 `90 归档/对话佐证/YYYY-MM/`，再更新索引。不要用全量迁移替代持续 projection 或语义整理；普通自动日记不例行复制整段聊天。
 
-`get_session_messages` 的 pending/archived 仍表达兼容分页的暂存/旧快照状态，不能单独推断连续转录是否已同步；用 health.last_projection 和实际 source_projections 收据核对。新进展持续更新接续入口，旧快照不自动覆盖。连续原文可在指定 `90 归档/Codex佐证` 路径下用 include_history 检索；返回 kind=source、source_state=projected 和消息版本/原文区间。人工注释与生成正文分别管理；未知身份、完成和源截断如实保留。
+`get_session_messages` 的 pending/archived 仍表达兼容分页的暂存/旧快照状态，不能单独推断连续转录是否已同步；用 health.last_projection 和实际 source_projections 收据核对。新进展持续更新接续入口，旧快照不自动覆盖。连续原文可在指定 `90 归档/对话佐证` 路径下用 include_history 检索；返回 kind=source、source_state=projected 和消息版本/原文区间。人工注释与生成正文分别管理；未知身份、完成和源截断如实保留。
 
 分页和会话发现现有 continuous_storage：capture_state/capture_version 说明 canonical 观察原文，projection_state/projection_current/projection_path 说明持续转录；current 仅在同代快照与程序区域哈希核对通过时成立，stale/missing/unverified 须报告。source_state=pending 也可能 projection_current=true。它们不证明上游全集、日周覆盖或持久 worker 已经运行。
 

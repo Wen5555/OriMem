@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 from orimem import config
-from orimem.capture import common
+from orimem.capture import common, formats
 
 NAME = 'claude'
 NAMESPACE = 'claude-code-adapter-v1'
@@ -72,7 +72,8 @@ def human(record):
 
 def parse(path):
     """Return (session_fields, events, stats); events follow transcript order."""
-    stats = dict(lines=0, invalid=0, kept=0, skipped=0)
+    stats = dict(lines=0, invalid=0, kept=0, skipped=0, messages=0, malformed=0)
+    types = set()
     title = cwd = None
     scheduled = False
     versions, entrypoints, events = [], set(), []
@@ -85,10 +86,15 @@ def parse(path):
                 stats['invalid'] += 1
                 continue
             kind = r.get('type')
+            types.add(kind)
             if kind == 'custom-title' and isinstance(r.get('customTitle'), str):
                 title = r['customTitle']
             if kind not in ('user', 'assistant'):
                 continue
+            stats['messages'] += 1
+            content = r.get('message', {}).get('content') if isinstance(r.get('message'), dict) else None
+            if not isinstance(content, (str, list)) or not isinstance(r.get('timestamp'), str):
+                stats['malformed'] += 1
             if r.get('turnOrigin') == 'scheduled':
                 scheduled = True   # Claude scheduled-task run: an automation echo, not an ordinary session
             if r.get('isSidechain') or r.get('isMeta') or r.get('isCompactSummary') or r.get('isVisibleInTranscriptOnly'):
@@ -125,8 +131,10 @@ def parse(path):
     first = next((e['content'] for e in events if e['role'] == 'user'), '')
     session = dict(title=(title or first)[:180], cwd=cwd or '', first_user_message=first,
                    cli_version=versions[-1] if versions else '', entrypoints=sorted(entrypoints), scheduled=scheduled)
+    session['format'] = formats.assess(NAME, session['cli_version'], header_ok=True, messages=stats['messages'],
+                                       malformed=stats['malformed'], invalid=stats['invalid'],
+                                       lines=stats['lines'], types=types)
     return session, events, stats
-
 
 
 def capture_file(path: Path) -> dict:
@@ -146,5 +154,7 @@ def capture_file(path: Path) -> dict:
         reason = 'no ordinary messages observed yet'
     if reason:
         common.forget_session(db, sid)
-        return dict(captured=False, session_id=sid, reason=reason)
-    return common.write_session(db, sid, path, session, events, stats, 'claude-code', 'anthropic-compatible')
+        return dict(captured=False, session_id=sid, reason=reason, format=session['format'])
+    result = common.write_session(db, sid, path, session, events, stats, 'claude-code', 'anthropic-compatible')
+    result['format'] = session['format']
+    return result

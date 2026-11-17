@@ -52,19 +52,44 @@ def _agents(value: str | None) -> list[str]:
     return agents
 
 
-def scaffold_vault(vault: Path) -> list[str]:
+def scaffold_vault(vault: Path, obsidian_setup: bool = True) -> list[str]:
+    """Create the layout's folders; on a fresh vault also AGENTS.md and the Obsidian first-run files."""
+    from orimem import obsidian
+    lay = config.layout()
     created = []
-    for folder in sorted(config.folders()) + ['50 日记/每日', '50 日记/每周', '90 归档/Codex佐证']:
+    vault.mkdir(parents=True, exist_ok=True)
+    for folder in config.folders():
         path = vault / folder
         if not path.exists():
             path.mkdir(parents=True)
             created.append(folder)
     rules = vault / 'AGENTS.md'
     if not rules.exists():
-        template = Path(__file__).resolve().parent / 'templates' / 'vault' / 'AGENTS.md'
-        rules.write_text(template.read_text(encoding='utf-8'), encoding='utf-8')
+        templates = Path(__file__).resolve().parent / 'templates' / 'vault'
+        template = templates / f"AGENTS.{lay['language']}.md"
+        if not template.exists():
+            template = templates / 'AGENTS.en.md'
+        rules.write_text(template.read_text(encoding='utf-8').format(**lay), encoding='utf-8')
         created.append('AGENTS.md')
+        if obsidian_setup:
+            created += obsidian.first_run(vault, lay)
     return created
+
+
+def _resolve_language(a, data: dict, existing: bool) -> None:
+    layout = data.setdefault('layout', {})
+    if a.lang:
+        layout['language'] = a.lang
+    elif not layout.get('language'):
+        if existing and data.get('journal_from'):
+            # Set up by 0.1.x: keep its Chinese layout and transcript folder.
+            layout['language'] = 'zh'
+            if not layout.get('evidence'):
+                layout['evidence'] = config.LEGACY_EVIDENCE
+        else:
+            detected = config.detect_language()
+            answer = _ask('库目录语言 / vault folder language (zh/en)', detected).lower()
+            layout['language'] = answer if answer in config.LAYOUTS else detected
 
 
 def cmd_init(a) -> None:
@@ -76,8 +101,13 @@ def cmd_init(a) -> None:
     if existing:
         import tomllib
         data = tomllib.loads(config.CONFIG_PATH.read_text(encoding='utf-8'))
-    vault = a.vault or data.get('vault') or _ask('Obsidian 库路径（不存在会新建）', str(config.home() / 'vault'))
+    vault = a.vault or data.get('vault') or _ask('Obsidian 库路径 / vault folder (created if missing)', str(config.home() / 'vault'))
     data['vault'] = str(Path(vault).expanduser().resolve())
+    _resolve_language(a, data, existing)
+    recall = data.setdefault('recall', {})
+    if a.lexical:
+        recall['mode'] = 'lexical'
+
     capture = data.setdefault('capture', {})
     if a.capture is not None:
         capture['enabled'] = a.capture == 'on'
@@ -94,10 +124,12 @@ def cmd_init(a) -> None:
         summary['enabled'] = True if _yes(answer) else ('ask' if answer.startswith('l') else False)
     config.save(data)
     config.reload()
-    out: dict = dict(config=str(config.CONFIG_PATH), vault=data['vault'],
-                     capture=capture['enabled'], daily_summary=summary['enabled'])
-    out['vault_created'] = scaffold_vault(config.vault())
-    if not a.skip_model:
+    out: dict = dict(config=str(config.CONFIG_PATH), vault=data['vault'], language=config.layout()['language'],
+                     capture=capture['enabled'], daily_summary=summary['enabled'], recall_mode=config.get('recall.mode'))
+    out['vault_created'] = scaffold_vault(config.vault(), obsidian_setup=not a.no_obsidian_setup)
+    if config.get('recall.mode') == 'lexical':
+        out['model'] = 'skipped: recall.mode = lexical (full-text only; `orimem config set recall.mode hybrid` + `orimem model download` enables vectors)'
+    elif not a.skip_model:
         try:
             out['model'] = model.import_from(Path(a.model_from)) if a.model_from else model.download(a.hf_endpoint, torch=a.torch)
         except Exception as error:
@@ -109,7 +141,14 @@ def cmd_init(a) -> None:
             out['daily_schedule'] = daily.apply_schedule()
         except Exception as error:
             out['daily_schedule'] = dict(error=str(error))
+    from orimem import obsidian
+    out['obsidian'] = obsidian.status(config.vault(), config.layout()['language'])
     _print(out)
+
+
+def cmd_open(a) -> None:
+    from orimem import obsidian
+    _print(obsidian.open_vault(config.vault(), config.layout()['language']))
 
 
 def cmd_install(a) -> None:
@@ -146,7 +185,12 @@ def cmd_config(a) -> None:
     if a.action == 'path':
         print(config.CONFIG_PATH)
     elif a.action == 'get':
-        _print(config.get(a.key) if a.key else config.load())
+        if a.key in ('layout', *('layout.' + r for r in (*config.ROLES, 'language'))):
+            # Resolved values: presets fill the roles left empty in config.toml.
+            lay = config.layout()
+            _print(lay if a.key == 'layout' else lay[a.key.split('.', 1)[1]])
+        else:
+            _print(config.get(a.key) if a.key else config.load())
     else:
         if not a.key or a.value is None:
             raise SystemExit('usage: orimem config set <key> <value>')
@@ -155,6 +199,15 @@ def cmd_config(a) -> None:
         if a.key.startswith('daily_summary.'):
             from orimem import daily
             result['schedule'] = daily.apply_schedule()
+        if a.key.startswith('layout.'):
+            result['created'] = scaffold_vault(config.vault(), obsidian_setup=False)
+            result['note'] = 'Existing notes are not moved; move them yourself if you renamed a folder.'
+        if a.key.startswith('recall.') or a.key.startswith('layout.') or a.key == 'mcp.tools':
+            from orimem.core.service import stop_service
+            stop_service()
+            result['service'] = 'restarted on next use'
+            if a.key == 'recall.mode':
+                result['next'] = 'run `orimem sync` to rebuild the index for this mode'
         _print(result)
 
 
@@ -186,12 +239,20 @@ def cmd_doctor(a) -> None:
     deps = {m: importlib.util.find_spec(m) is not None
             for m in ('numpy', 'onnxruntime', 'tokenizers', 'watchdog', 'jsonschema', 'yaml', 'zstandard', 'requests',
                       'torch', 'transformers')}
-    from orimem.core.embedding import choose_backend
-    try:
-        backend = choose_backend(model.model_dir())
-    except RuntimeError as error:
-        backend = str(error)
-    out = dict(home=str(config.home()), config_exists=config.CONFIG_PATH.exists(), vault=str(config.vault()), embedder=backend,
+    from orimem import obsidian
+    from orimem.core.embedding import choose_backend, recall_mode
+    if recall_mode() == 'lexical':
+        backend = 'none (recall.mode = lexical: full-text only)'
+    else:
+        try:
+            backend = choose_backend(model.model_dir())
+        except RuntimeError as error:
+            backend = str(error)
+    from orimem.capture import format_report
+    out = dict(home=str(config.home()), config_exists=config.CONFIG_PATH.exists(), vault=str(config.vault()),
+               recall_mode=recall_mode(), embedder=backend, layout=config.layout(),
+               obsidian=obsidian.status(config.vault(), config.layout()['language']),
+               transcript_formats=format_report(),
                vault_exists=config.vault().is_dir(), db_exists=config.db().exists(), model=model.status(),
                dependencies=deps, agents_detected=adapters.detect(), capture=config.get('capture'),
                daily_summary=daily.status())
@@ -248,8 +309,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument('--model-from', help='import an existing local copy of the pinned model')
     s.add_argument('--hf-endpoint', help='model download endpoint; default tries huggingface.co then hf-mirror.com')
     s.add_argument('--torch', action='store_true', help='also download PyTorch weights (needs orimem[torch])')
+    s.add_argument('--lang', choices=sorted(config.LAYOUTS), help='vault folder language; default: system locale')
+    s.add_argument('--lexical', action='store_true',
+                   help='full-text search only: no embedding model download (switch later with recall.mode)')
+    s.add_argument('--no-obsidian-setup', action='store_true', help='do not write .obsidian or the welcome note')
     s.add_argument('-y', '--yes', action='store_true', help='accept defaults for every question')
     s.set_defaults(fn=cmd_init)
+
+    s = sub.add_parser('open', help='open the vault in Obsidian (or say how to install/add it)')
+    s.set_defaults(fn=cmd_open)
 
     for name, fn in (('install', cmd_install), ('uninstall', cmd_uninstall)):
         s = sub.add_parser(name, help=f'{name} MCP server, skill and hooks for agents')

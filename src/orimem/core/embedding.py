@@ -12,7 +12,7 @@ pooling and L2 normalization, so the model id (and stored vectors) are shared.
 """
 
 from pathlib import Path
-import json, os, threading
+import json, os, re, threading
 import numpy as np
 
 from orimem import config as _config
@@ -38,7 +38,55 @@ def choose_backend(path: Path) -> str:
     if has_torch:
         return "torch"
     raise RuntimeError("Embedding model not installed: run `orimem model download` "
-                       "(ONNX, needs onnxruntime + tokenizers) or install orimem-mcp[torch]")
+                       "(or, to search without vectors, `orimem config set recall.mode lexical`)")
+
+
+LEXICAL_MODEL_ID = "lexical-only:fts5:v1"
+
+
+class _RegexTokenizer:
+    """Model-free stand-in for chunking: one token per CJK character or per non-space run."""
+    _CJK = "぀-ヿ㐀-䶿一-鿿豈-﫿가-힯"
+    PATTERN = re.compile("[" + _CJK + "]|[^\\s" + _CJK + "]+")
+
+    def __call__(self, text, add_special_tokens=False, truncation=False, max_length=None,
+                 return_offsets_mapping=False, **_ignored):
+        found = list(self.PATTERN.finditer(text))
+        if truncation and max_length is not None:
+            found = found[:max_length]
+        out = {"input_ids": [m.group() for m in found], "attention_mask": [1] * len(found)}
+        if return_offsets_mapping:
+            out["offset_mapping"] = [(m.start(), m.end()) for m in found]
+        return out
+
+    @staticmethod
+    def decode(ids, skip_special_tokens=False):
+        return " ".join(ids)
+
+
+class LexicalOnly:
+    """Degraded mode (``recall.mode = "lexical"``): no model, no vectors; FTS5 + links only.
+
+    Its model id differs from the vector model's, so switching back to ``hybrid``
+    makes the next sync re-chunk and embed everything.
+    """
+    path = None
+    backend = "lexical"
+
+    def __init__(self):
+        self.model_id = LEXICAL_MODEL_ID
+        self.tokenizer = _RegexTokenizer()
+
+    def encode(self, texts, query=False):
+        return np.zeros((len(texts), 0), dtype="<f4")
+
+
+def recall_mode() -> str:
+    return "lexical" if str(_config.get("recall.mode") or "hybrid").lower() == "lexical" else "hybrid"
+
+
+def make_embedder():
+    return LexicalOnly() if recall_mode() == "lexical" else Embedder()
 
 
 class Embedder:

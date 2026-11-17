@@ -25,12 +25,15 @@ def noise_ranges(original):
     visible prefix would accidentally encode the tail as topic semantics.
     """
     ranges=[]
-    prefixes=('- [[90 ','来源：[[90 ','来源定位：','[[30 知识/知识索引','- 基线结果：','- 方法与论文区别：','- 测试分支审查依据：')
+    from orimem import config
+    lay=config.layout(); archive='[['+lay['archive']
+    prefixes=('- '+archive,'来源：'+archive,'Source: '+archive,'来源定位：','[['+lay['knowledge_index'],'- 基线结果：','- 方法与论文区别：','- 测试分支审查依据：')
     for line in re.finditer(r'[^\n]+(?:\n|$)',original):
         text=line.group(0)
         if text.lstrip().startswith(prefixes):ranges.append((line.start(),line.end()))
-        elif '来源：[[90 ' in text:
-            ranges.append((line.start()+text.index('来源：[[90 '),line.end()))
+        elif '来源：'+archive in text or 'Source: '+archive in text:
+            at=min(text.find(m) for m in ('来源：'+archive,'Source: '+archive) if m in text)
+            ranges.append((line.start()+at,line.end()))
     return ranges
 
 def without_noise(original,start,end,ranges):

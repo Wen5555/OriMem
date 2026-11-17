@@ -42,9 +42,9 @@ def handle(event,db=DB,vault=VAULT,scope=None):
         old=c.execute('SELECT * FROM hook_sessions WHERE session_id=?',(session,)).fetchone()
         muted=bool(old['skip_recording']) if old else False
         if name=='UserPromptSubmit':
-            if any(term in prompt for term in ['不记录','不要记录','只读','不要写入知识库']):
+            if any(term in prompt.lower() for term in ['不记录','不要记录','只读','不要写入知识库',"don't record",'do not record','read-only, no notes','off the record']):
                 muted=True
-            elif any(term in prompt for term in ['恢复记录','允许记录','可以记录']):
+            elif any(term in prompt.lower() for term in ['恢复记录','允许记录','可以记录','resume recording','you may record']):
                 muted=False
         turn=event.get('turn_id')
         turn=turn if isinstance(turn,str) and len(turn)<=200 else (old['last_turn'] if old else None)

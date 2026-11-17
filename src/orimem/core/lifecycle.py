@@ -6,6 +6,7 @@ reading acknowledgement, evidence and receipts; it never manufactures knowledge.
 from datetime import datetime, timezone, timedelta
 import hashlib, json, uuid
 import sqlite3
+from orimem import config as _config
 
 
 def sha(value):
@@ -391,7 +392,7 @@ class Lifecycle:
                         indexed = c.execute('SELECT sha FROM notes WHERE path=?',(note['path'],)).fetchone()
                         raw=self.backend.path(note['path']).read_bytes()
                         props=journal_writer.properties(raw.decode('utf-8-sig'))
-                        if props.get('orion_index') is False or note['path'].startswith('90 归档/旧文件/'):
+                        if props.get('orion_index') is False or _config.under(note['path'], _config.layout_path('legacy')):
                             # A user-excluded manual archive is verified as
                             # absent from Markdown search, not a stuck index.
                             if indexed or sha(raw)!=note['sha256'] or expected.get(note['path'])!=note['sha256']:
@@ -595,7 +596,7 @@ class Lifecycle:
                         raise ValueError('Period job completion requires a verified writer receipt batch')
                     receipt = journal_state.verify_receipt(self.backend.state_path.parent/'receipts'/(receipt_batch+'.json'),self.backend.state_path,self.backend.vault)
                     payload = json.loads(r['payload'])
-                    target = ('50 日记/每日/'+payload['day']+'.md') if r['kind']=='daily' else ('50 日记/每周/'+payload['week']+' 周复盘.md')
+                    target = _config.daily_note(payload['day']) if r['kind']=='daily' else _config.weekly_note(payload['week'])
                     if not any(n['path']==target for n in receipt['notes']):
                         raise ValueError('Receipt does not verify the material target period')
                 elif r['kind']=='index':
@@ -636,7 +637,7 @@ class Lifecycle:
                 raise ValueError('Claim quotation does not match pinned source')
             if claim['strength'] not in {'user-confirmed','historical-report','inference','verified-artifact'}:
                 raise ValueError('Invalid evidence strength')
-            if claim['path'].startswith('30 知识/') and (not claim['boundary'] or not claim.get('promotion_reason')):
+            if _config.under(claim['path'], _config.layout_path('knowledge')) and (not claim['boundary'] or not claim.get('promotion_reason')):
                 raise ValueError('Formal knowledge needs boundaries and promotion rationale')
         return r,text
 

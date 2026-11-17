@@ -46,9 +46,19 @@ irm https://raw.githubusercontent.com/Wen5555/OriMem/main/scripts/install.ps1 | 
 curl -LsSf https://raw.githubusercontent.com/Wen5555/OriMem/main/scripts/install.sh | sh
 ```
 
-安装脚本会按需装好 [uv](https://github.com/astral-sh/uv)，把 OriMem 装进一个独立环境（约 120 MB，Python 也由 uv 提供），然后运行 `orimem init`。
+安装脚本会按需装好 [uv](https://github.com/astral-sh/uv)，把 OriMem 装进一个独立环境（约 130 MB，Python 也由 uv 提供），然后运行 `orimem init`。
 
-`init` 只问三个问题：库放在哪里、是否开启对话采集（默认开）、是否开启每日总结（默认“以后再说”）。之后它会下载约 470 MB 的嵌入模型，并接入检测到的所有 agent。装完重启一下各个 agent 即可。
+`init` 只问几个问题：库放在哪里、目录用中文还是英文（按系统语言默认）、是否开启对话采集（默认开）、是否开启每日总结（默认“以后再说”）。之后它会下载约 490 MB 的嵌入模型，并接入检测到的所有 agent。装完重启一下各个 agent 即可。
+
+还没装 Obsidian 也没关系：库就是普通的 Markdown 文件夹，agent 直接读写。`init` 会为首次打开做好准备（欢迎页、新笔记默认进收件箱、日记进每日目录），并提示如何安装或添加这个库；之后用 `orimem open` 打开。磁盘紧张或离线时可以用 `orimem init --lexical` 跳过模型，只用全文检索；以后随时 `orimem config set recall.mode hybrid` 切回向量检索。
+
+| 组成 | 大小 |
+|---|---|
+| OriMem 运行环境（onnxruntime、numpy、tokenizers 等） | 约 130 MB |
+| 嵌入模型（`model.onnx` 与分词器） | 约 490 MB（`--lexical` 时为 0） |
+| uv 与 Python 3.12（仅在本机没有时安装） | 约 70 MB + 70 MB |
+| **常见总量** | **约 0.6 GB**（全新机器约 0.75 GB；只用全文检索约 0.13 GB） |
+| 可选 PyTorch 后端（`orimem-mcp[torch]`） | 另加 1 GB 以上 |
 
 **在中国大陆？** 安装脚本检测到 PyPI 连不上时，会自动切换到清华 PyPI、npmmirror 的 Python 镜像和 hf-mirror.com，不用手动设置。
 
@@ -118,7 +128,7 @@ flowchart LR
 
 - **召回：** `task_context` 绑定当前项目，`recall` 返回排好序的摘要，`evidence` 按偏移和哈希取回原文。
 - **写回：** agent 提交完整的笔记修改方案；OriMem 校验预期哈希，然后依次备份、写入、回读，核对声明的文本，最后出具收据。
-- **采集：** 每家 agent 有自己的解析器，把普通的用户和助手消息汇入同一条流程，暂存后投影成 `90 归档/Codex佐证/` 下稳定的转录笔记。钩子把采集交给正在运行的后台服务；服务没运行时，才退回到自己启动一个采集进程。所以在 dsh 这类带沙箱的钩子执行环境里也能用。
+- **采集：** 每家 agent 有自己的解析器，把普通的用户和助手消息汇入同一条流程，暂存后投影成库内 evidence 目录下稳定的转录笔记。Stop 钩子只把会话交给正在运行的后台服务（服务没运行时才自己启动一个采集进程），在 Claude Code 和 Codex 中登记为 `async` 后台钩子，不会拖慢回合；dsh 的钩子一律同步执行，这一步也只需零点几秒。会话开始和提交提示词的钩子负责注入项目背景，所以保持同步。每次解析都会记录客户端与格式版本并检查记录结构：不支持的格式不采集，结构变化会显示在 `orimem doctor` 里。
 
 ## 设置
 
@@ -134,7 +144,13 @@ flowchart LR
 | `daily_summary.enabled` | `"ask"` | `"ask"`：问一次，回答前视为关闭 · `true` · `false` |
 | `daily_summary.time` | `"22:30"` | 每日总结的运行时间 |
 | `daily_summary.agent` | 自动 | 用 `claude` 还是 `codex` 生成总结 |
+| `recall.mode` | `"hybrid"` | `hybrid`：向量 + 全文（需要模型）· `lexical`：只用全文与双链，不需要模型 |
 | `recall.hf_endpoint` | 自动 | 模型下载地址（连不上时自动换成 hf-mirror.com） |
+| `mcp.tools` | `"core"` | `core` 只开放 8 个常用工具 · `all` 同时开放高级工具 |
+| `mcp.extra` | `[]` | 在 `core` 下额外开放的个别高级工具，例如 `["health"]` |
+| `layout.language` | 系统语言 | 目录预设：`zh` 或 `en` |
+| `layout.<角色>` | 预设值 | 单独改某个目录：`inbox`、`drafts`、`projects`、`courses`、`areas`、`knowledge`、`daily`、`weekly`、`archive`、`evidence`、`legacy`、`workspace`；以及 `course_home`、`weekly_note`、`knowledge_index` |
+| `layout.extra_writable` | `[]` | 允许自动写回的其他目录 |
 
 ## 参考
 
@@ -145,7 +161,9 @@ flowchart LR
 |---|---|
 | `orimem init [-y]` | 首次配置 |
 | `orimem install / uninstall [--agent claude,codex,dsh] [--dsh-profile 名称]` | 接入或移除 agent |
-| `orimem doctor` | 检查配置、模型、嵌入后端、依赖和各 agent 的状态 |
+| `orimem init [-y] [--lang zh\|en] [--lexical]` | 指定目录语言 / 不下载模型地重新配置 |
+| `orimem doctor` | 检查配置、模型、嵌入后端、库结构、Obsidian、对话格式、依赖和各 agent 的状态 |
+| `orimem open` | 在 Obsidian 中打开本库（或提示如何安装、添加） |
 | `orimem capture [--source X] [--session ID] [--backfill]` | 立即采集 |
 | `orimem sync` · `orimem recall "问题" --scope "10 项目"` | 在命令行里索引、检索 |
 | `orimem daily status / run [--dry-run] / apply` | 每日总结 |
@@ -158,36 +176,53 @@ flowchart LR
 <details>
 <summary><b>MCP 工具</b></summary>
 
+默认开放（8 个）：
+
 | 工具 | 用途 |
 |---|---|
 | `task_context` | 把当前目录或任务绑定到项目入口 |
-| `recall` | 混合检索（返回摘要） |
+| `recall` | 混合（或全文）检索，返回摘要 |
 | `evidence` | 按结果 ID 取回原文 |
 | `list_sessions` · `get_session_messages` | 浏览已采集的对话 |
 | `prepare_record` · `commit_record` | 可验收的写回 |
-| `initialize` | 新建项目或课程入口 |
+| `config_set` | 记录用户做出的设置决定（如每日总结） |
+
+高级工具（`orimem config set mcp.tools all`，或把个别工具加入 `mcp.extra`）：
+
+| 工具 | 用途 |
+|---|---|
+| `initialize` | 新建带工作区绑定的项目或课程入口 |
 | `lifecycle` | 来源阅读、知识候选、纠正 |
 | `health` · `sync` · `archive_history` | 维护 |
-| `config_get` · `config_set` · `capture_now` | 设置与采集 |
+| `config_get` · `capture_now` | 查看设置、立即采集 |
 </details>
 
 <details>
 <summary><b>库结构</b></summary>
 
+`init` 按系统语言选择中文或英文预设（可用 `--lang` 指定）；每个目录都能用 `orimem config set layout.<角色> "<路径>"` 改名（已有笔记不会自动移动），`orimem config get layout` 查看实际布局。
+
 ```text
-00 收件箱/   待整理内容、知识候选
-10 项目/     每个项目一页（状态、下一步）
-15 课程/     课程
-30 知识/     可复用的正式知识
-50 日记/     每日/ · 每周/
-90 归档/     历史快照；90 归档/Codex佐证/ 存放采集的对话转录
-95 AI 工作区/ agent 的工作记录
+中文预设                    英文预设
+00 收件箱/（AI 草稿/）      00 Inbox/ (AI Drafts/)            待整理内容、知识候选
+10 项目/                    10 Projects/                      每个项目一页
+15 课程/<课程>/课程主页     15 Courses/<course>/Course Home
+30 知识/                    30 Knowledge/                     可复用的正式知识
+50 日记/每日 · 每周         50 Journal/Daily · Weekly
+90 归档/对话佐证/           90 Archive/Conversations/         采集的对话转录
+95 AI 工作区/               95 AI Workspace/                  agent 的工作记录
 ```
 
-写入只允许进入 `layout.folders` 列出的目录。`.obsidian` 和库外文件不会被读取或修改。
+自动写回只允许进入项目、课程主页、知识、每日/每周日记、AI 草稿、AI 工作区和对话佐证目录（以及 `layout.extra_writable`）。`.obsidian` 只在 `init` 新建一个从未被 Obsidian 打开过的库时写入一次；库外文件不会被触碰。0.1.x 建立的库继续使用 `90 归档/Codex佐证`。
 </details>
 
 ## 常见问题
+
+**必须安装 Obsidian 吗？** 不必。agent 直接读写 Markdown 文件夹，Obsidian 只是可选的界面。`orimem doctor` 会显示是否已安装、库是否已添加。
+
+**能不下载模型吗？** 能：`orimem config set recall.mode lexical`（或 `init --lexical`）。这时召回只用 SQLite 全文检索和双链；改回 `hybrid` 并运行 `orimem model download`、`orimem sync` 即可恢复向量检索。
+
+**钩子会拖慢 agent 吗？** 采集在后台进行（Claude Code 和 Codex 中 Stop 钩子为 `async`）。会话开始和提交提示词的钩子约需 0.25 秒，用来注入项目背景。
 
 **需要 GPU 或 PyTorch 吗？** 不需要。嵌入在 CPU 上通过 ONNX Runtime 运行。如果想用 PyTorch，可以安装 `orimem[torch]` 并运行 `orimem model download --torch`，两种后端生成的向量完全一致。
 
@@ -199,7 +234,8 @@ flowchart LR
 
 ## 路线图
 
-- [ ] 可配置的库结构，并提供英文版目录
+- [x] 可配置的库结构，并提供英文版目录
+- [x] 不需要模型的全文检索模式
 - [ ] 支持更多 agent（Cursor、Gemini CLI、OpenCode）
 - [ ] 为小内存机器提供可选的量化 ONNX 模型
 

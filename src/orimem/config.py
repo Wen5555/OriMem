@@ -28,13 +28,22 @@ DEFAULTS: dict = {
         "time": "22:30",
         "agent": "",                   # claude | codex | "" (auto: first installed)
     },
-    "layout": {
-        "project_scopes": ["10 项目", "15 课程"],
-        "folders": ["00 收件箱", "10 项目", "15 课程", "30 知识", "50 日记", "90 归档", "95 AI 工作区"],
+    "layout": {                        # vault folders by role; "" -> the language preset (see LAYOUTS)
+        "language": "",                # zh | en; set by `orimem init`
+        "inbox": "", "drafts": "", "projects": "", "courses": "", "areas": "", "knowledge": "",
+        "journal": "", "daily": "", "weekly": "", "archive": "", "evidence": "", "legacy": "",
+        "workspace": "", "course_home": "", "weekly_note": "", "knowledge_index": "",
+        "project_scopes": [],          # [] -> [projects, courses]
+        "extra_writable": [],          # further folders automatic write-back may touch
     },
     "recall": {
+        "mode": "hybrid",              # hybrid (vectors + full text, needs the model) | lexical (no model)
         "model": "intfloat/multilingual-e5-small",
         "hf_endpoint": "",             # e.g. https://hf-mirror.com
+    },
+    "mcp": {
+        "tools": "core",               # core (8 everyday tools) | all (also the advanced ones)
+        "extra": [],                   # with "core": individual advanced tools to publish too
     },
     "sources": {                       # where each agent keeps its transcripts
         "claude": "~/.claude/projects",
@@ -105,6 +114,14 @@ def set_value(key: str, value) -> dict:
         known = known[part]
     if key == "daily_summary.enabled" and value not in ("ask", True, False):
         raise ValueError('daily_summary.enabled must be "ask", true or false')
+    if key == "mcp.tools" and value not in ("core", "all"):
+        raise ValueError('mcp.tools must be "core" or "all"')
+    if key == "recall.mode" and value not in ("hybrid", "lexical"):
+        raise ValueError('recall.mode must be "hybrid" or "lexical"')
+    if key == "layout.language" and value not in LAYOUTS:
+        raise ValueError("layout.language must be one of: " + ", ".join(LAYOUTS))
+    if key.startswith("layout.") and isinstance(known, str) and isinstance(value, str) and value:
+        _check_rel(value, key)
     node = data
     for part in parts[:-1]:
         node = node.setdefault(part, {})
@@ -189,9 +206,105 @@ def journal_from() -> str:
     return str(get("journal_from") or "2000-01-01T00:00:00+00:00")
 
 
+LAYOUTS: dict = {
+    "zh": {
+        "inbox": "00 收件箱", "drafts": "00 收件箱/AI 草稿", "projects": "10 项目", "courses": "15 课程",
+        "areas": "20 长期领域", "knowledge": "30 知识", "journal": "50 日记", "daily": "50 日记/每日",
+        "weekly": "50 日记/每周", "archive": "90 归档", "evidence": "90 归档/对话佐证", "legacy": "90 归档/旧文件",
+        "workspace": "95 AI 工作区", "course_home": "课程主页", "weekly_note": "{week} 周复盘",
+        "knowledge_index": "30 知识/知识索引",
+    },
+    "en": {
+        "inbox": "00 Inbox", "drafts": "00 Inbox/AI Drafts", "projects": "10 Projects", "courses": "15 Courses",
+        "areas": "20 Areas", "knowledge": "30 Knowledge", "journal": "50 Journal", "daily": "50 Journal/Daily",
+        "weekly": "50 Journal/Weekly", "archive": "90 Archive", "evidence": "90 Archive/Conversations",
+        "legacy": "90 Archive/Legacy", "workspace": "95 AI Workspace", "course_home": "Course Home",
+        "weekly_note": "{week} Weekly Review", "knowledge_index": "30 Knowledge/Knowledge Index",
+    },
+}
+ROLES = tuple(LAYOUTS["zh"])
+# Vaults set up by 0.1.x have no layout.language; their transcripts already live here.
+LEGACY_EVIDENCE = "90 归档/Codex佐证"
+
+
+def _check_rel(value: str, key: str = "layout") -> str:
+    norm = value.replace("\\", "/").strip("/")
+    parts = norm.split("/")
+    if not norm or any(p in ("", ".", "..") or p.startswith(".") for p in parts) or ":" in norm:
+        raise ValueError(f"{key} must be a relative folder inside the vault: {value!r}")
+    return norm
+
+
+def detect_language() -> str:
+    """zh for Chinese locales, en otherwise (ORIMEM_LANG overrides)."""
+    import locale
+    hints = [os.environ.get("ORIMEM_LANG", ""), os.environ.get("LC_ALL", ""), os.environ.get("LANG", "")]
+    try:
+        hints.append(locale.getlocale()[0] or "")
+    except ValueError:
+        pass
+    if os.name == "nt":
+        try:
+            import ctypes
+            hints.append(locale.windows_locale.get(ctypes.windll.kernel32.GetUserDefaultUILanguage(), ""))
+        except Exception:
+            pass
+    for hint in hints:
+        low = hint.lower()
+        if low.startswith(("zh", "chinese")):
+            return "zh"
+        if low.startswith(("en", "english")):
+            return "en"
+    return "en"
+
+
+def layout() -> dict:
+    """Resolved vault layout: every role -> relative folder (or note name), plus language."""
+    lang = str(get("layout.language") or "")
+    preset = dict(LAYOUTS.get(lang) or LAYOUTS["zh"])
+    if not lang:
+        preset["evidence"] = LEGACY_EVIDENCE
+    out = {"language": lang or "zh"}
+    for role in ROLES:
+        value = str(get("layout." + role) or "") or preset[role]
+        out[role] = value if role in ("course_home", "weekly_note") else _check_rel(value, "layout." + role)
+    return out
+
+
+def layout_path(role: str) -> str:
+    return layout()[role]
+
+
+def under(rel: str, folder: str) -> bool:
+    rel = rel.replace("\\", "/").strip("/")
+    return rel == folder or rel.startswith(folder + "/")
+
+
+def daily_note(day: str) -> str:
+    return f"{layout_path('daily')}/{day}.md"
+
+
+def weekly_note(week: str) -> str:
+    lay = layout()
+    return f"{lay['weekly']}/{lay['weekly_note'].format(week=week)}.md"
+
+
 def project_scopes() -> list[str]:
-    return list(get("layout.project_scopes") or [])
+    lay = layout()
+    return list(get("layout.project_scopes") or [lay["projects"], lay["courses"]])
 
 
-def folders() -> set[str]:
-    return set(get("layout.folders") or [])
+def writable() -> list[str]:
+    """Folders automatic write-back may touch (journal only through daily/weekly)."""
+    lay = layout()
+    base = [lay[r] for r in ("drafts", "projects", "courses", "knowledge", "daily", "weekly", "evidence", "workspace")]
+    return base + [_check_rel(str(x)) for x in (get("layout.extra_writable") or [])]
+
+
+def folders() -> list[str]:
+    """Every folder the layout names (for scaffolding)."""
+    lay = layout()
+    found = {lay[r] for r in ROLES if r not in ("course_home", "weekly_note", "knowledge_index")}
+    if "/" in lay["knowledge_index"]:
+        found.add(lay["knowledge_index"].rsplit("/", 1)[0])
+    return sorted(found)

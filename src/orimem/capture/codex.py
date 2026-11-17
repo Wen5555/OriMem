@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from orimem import config
-from orimem.capture import common
+from orimem.capture import common, formats
 
 NAME = 'codex'
 NAMESPACE = 'codex-rollout-adapter-v1'
@@ -51,8 +51,8 @@ def _text(content, kinds):
 
 
 def parse(path: Path):
-    stats = dict(lines=0, invalid=0, kept=0, skipped=0)
-    meta, events = {}, []
+    stats = dict(lines=0, invalid=0, kept=0, skipped=0, messages=0, malformed=0)
+    meta, events, types = {}, [], set()
     with open(path, encoding='utf-8') as f:
         for line_no, line in enumerate(f, 1):
             stats['lines'] += 1
@@ -61,12 +61,16 @@ def parse(path: Path):
             except ValueError:
                 stats['invalid'] += 1
                 continue
+            types.add(r.get('type'))
             payload = r.get('payload') if isinstance(r.get('payload'), dict) else {}
             if r.get('type') == 'session_meta' and not meta:
                 meta = payload
                 continue
             if r.get('type') != 'response_item' or payload.get('type') != 'message':
                 continue
+            stats['messages'] += 1
+            if not isinstance(payload.get('content'), list) or not isinstance(r.get('timestamp'), str):
+                stats['malformed'] += 1
             role = payload.get('role')
             if role not in ('user', 'assistant'):
                 stats['skipped'] += 1
@@ -92,6 +96,9 @@ def parse(path: Path):
                    cli_version=meta.get('cli_version') or '', id=meta.get('id') or meta.get('session_id'),
                    thread_source=meta.get('thread_source') or 'user',
                    subagent=isinstance(source, dict) and 'subagent' in source)
+    session['format'] = formats.assess(NAME, session['cli_version'], header_ok=bool(meta),
+                                       messages=stats['messages'], malformed=stats['malformed'],
+                                       invalid=stats['invalid'], lines=stats['lines'], types=types)
     return session, events, stats
 
 
@@ -112,5 +119,7 @@ def capture_file(path: Path) -> dict:
         reason = 'no ordinary messages observed yet'
     if reason:
         common.forget_session(db, sid)
-        return dict(captured=False, session_id=sid, reason=reason)
-    return common.write_session(db, sid, path, session, events, stats, 'codex', 'openai-compatible')
+        return dict(captured=False, session_id=sid, reason=reason, format=session['format'])
+    result = common.write_session(db, sid, path, session, events, stats, 'codex', 'openai-compatible')
+    result['format'] = session['format']
+    return result

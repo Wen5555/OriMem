@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import datetime
 import json, re, difflib, uuid
 from orimem import journal_writer, journal_state
+from orimem import config as _config
 from .backend import digest
 from .content_policy import local_content as sanitize
 
@@ -74,7 +75,8 @@ def initialize(backend, name, category="project", workspace=None):
         raise ValueError("Invalid category")
     if workspace and (not isinstance(workspace, str) or len(workspace) > 500):
         raise ValueError("Invalid workspace metadata")
-    rel = f"15 课程/{name}/课程主页.md" if category == 'course' else f"10 项目/{name}.md"
+    lay = _config.layout()
+    rel = f"{lay['courses']}/{name}/{lay['course_home']}.md" if category == 'course' else f"{lay['projects']}/{name}.md"
     path = backend.path(rel)
     if path.exists():
         raw=path.read_bytes()
