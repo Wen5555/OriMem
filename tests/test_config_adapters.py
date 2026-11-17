@@ -44,13 +44,13 @@ def test_claude_install_uninstall_roundtrip(env):
     assert len(data['hooks']['Stop']) == 2 and 'SessionStart' in data['hooks']
     state = json.loads((env['home'] / '.claude.json').read_text(encoding='utf-8'))
     assert state['mcpServers']['orimem']['args'][-1] == 'mcp'
-    assert (env['home'] / '.claude' / 'skills' / 'OriMem' / 'SKILL.md').exists()
+    assert (env['home'] / '.claude' / 'skills' / 'orimem' / 'SKILL.md').exists()
     adapters.install(['claude'])          # idempotent
     assert len(json.loads(settings.read_text(encoding='utf-8'))['hooks']['Stop']) == 2
     adapters.uninstall(['claude'])
     assert json.loads(settings.read_text(encoding='utf-8')) == original
     assert 'orimem' not in json.loads((env['home'] / '.claude.json').read_text(encoding='utf-8'))['mcpServers']
-    assert not (env['home'] / '.claude' / 'skills' / 'OriMem').exists()
+    assert not (env['home'] / '.claude' / 'skills' / 'orimem').exists()
 
 
 def test_codex_install_uninstall_roundtrip(env):
@@ -59,7 +59,7 @@ def test_codex_install_uninstall_roundtrip(env):
     cfg = env['home'] / '.codex' / 'config.toml'
     cfg.parent.mkdir(parents=True)
     original = 'model = "gpt"\n\n[mcp_servers.other]\ncommand = "x"\n'
-    cfg.write_text(original, encoding='utf-8')
+    cfg.write_bytes(original.encode('utf-8'))
     out = adapters.install(['codex'])
     assert 'error' not in out['codex'], out
     parsed = tomllib.loads(cfg.read_text(encoding='utf-8'))
@@ -69,7 +69,7 @@ def test_codex_install_uninstall_roundtrip(env):
     adapters.install(['codex'])
     assert cfg.read_text(encoding='utf-8').count('[mcp_servers.orimem]') == 1
     adapters.uninstall(['codex'])
-    assert tomllib.loads(cfg.read_text(encoding='utf-8')) == tomllib.loads(original)
+    assert cfg.read_bytes() == original.encode('utf-8')
 
 
 def test_dsh_install_uninstall_roundtrip(env):
@@ -78,11 +78,14 @@ def test_dsh_install_uninstall_roundtrip(env):
     profile = env['home'] / '.dsh' / 'profiles' / 'desktop'
     profile.mkdir(parents=True)
     original = '# my patch\n- id: ui-chat\n  name: "@deepseek-ai/dsh-client-ui-chat"\n  config:\n    x: !!js process.env.X\n'
-    (profile / 'cordis.patch.yml').write_text(original, encoding='utf-8')
+    (profile / 'cordis.patch.yml').write_bytes(original.encode('utf-8'))
     empty = env['home'] / '.dsh' / 'profiles' / 'web'
     empty.mkdir()
     (empty / 'cordis.patch.yml').write_text('# empty layer\n[]\n', encoding='utf-8')
     out = adapters.install(['dsh'])
+    assert out['dsh']['hooks_file'] is None      # dsh hooks are opt-in
+    from orimem.adapters import install_dsh, Backup
+    install_dsh(Backup(), True, dsh_hooks=True)
     assert 'error' not in out['dsh'], out
     for patch in (profile / 'cordis.patch.yml', empty / 'cordis.patch.yml'):
         data = yaml.load(patch.read_text(encoding='utf-8'), Loader=adapters._DshLoader)
@@ -91,7 +94,15 @@ def test_dsh_install_uninstall_roundtrip(env):
         assert inserted[0]['config']['args'][-1] == 'mcp'
     hooks_file = json.loads((env['tmp'] / 'orimem' / 'dsh-hooks.json').read_text(encoding='utf-8'))
     assert '--agent dsh' in hooks_file['hooks']['Stop'][0]['hooks'][0]['command']
-    assert (env['home'] / '.dsh' / 'skills' / 'OriMem' / 'SKILL.md').exists()
+    assert (env['home'] / '.dsh' / 'skills' / 'orimem' / 'SKILL.md').exists()
     adapters.uninstall(['dsh'])
-    assert (profile / 'cordis.patch.yml').read_text(encoding='utf-8').strip() == original.strip()
+    assert (profile / 'cordis.patch.yml').read_bytes() == original.encode('utf-8')   # byte-identical, LF kept
     assert yaml.safe_load((empty / 'cordis.patch.yml').read_text(encoding='utf-8')) == []
+
+
+def test_mcp_instructions_carry_daily_question_only_while_ask(env):
+    from orimem import config
+    from orimem.core.mcp_server import server_instructions
+    assert 'config_set' in server_instructions()
+    config.set_value('daily_summary.enabled', False)
+    assert 'daily_summary' not in server_instructions()

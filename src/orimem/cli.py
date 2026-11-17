@@ -28,6 +28,8 @@ def _yes(text: str) -> bool:
 
 def _agents(value: str | None) -> list[str]:
     from orimem import adapters
+    if value == 'none':
+        return []
     if not value or value == 'auto':
         found = adapters.detect()
         return [a for a in adapters.AGENTS if found.get(a)]
@@ -87,7 +89,7 @@ def cmd_init(a) -> None:
         except Exception as error:
             out['model'] = dict(error=str(error), hint='稍后运行 orimem model download 或 orimem model import <目录>')
     agents = _agents(a.agents)
-    out['agents'] = adapters.install(agents, hooks=not a.no_hooks) if agents else 'none detected'
+    out['agents'] = adapters.install(agents, hooks=not a.no_hooks, dsh_profiles=a.dsh_profile) if agents else 'none'
     if summary['enabled'] is True:
         try:
             out['daily_schedule'] = daily.apply_schedule()
@@ -98,12 +100,12 @@ def cmd_init(a) -> None:
 
 def cmd_install(a) -> None:
     from orimem import adapters
-    _print(adapters.install(_agents(a.agent), hooks=not a.no_hooks))
+    _print(adapters.install(_agents(a.agent), hooks=not a.no_hooks, dsh_profiles=a.dsh_profile))
 
 
 def cmd_uninstall(a) -> None:
     from orimem import adapters
-    _print(adapters.uninstall(_agents(a.agent)))
+    _print(adapters.uninstall(_agents(a.agent), dsh_profiles=a.dsh_profile))
 
 
 def cmd_snippet(a) -> None:
@@ -209,14 +211,16 @@ def cmd_backend(a) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog='orimem', description='OriMem: local Obsidian memory for coding agents',
-                                epilog='Low-level passthrough: orimem journal|write|lifecycle --help')
+                                epilog='Global: orimem --home <dir> <command> overrides ORIMEM_HOME. '
+                                       'Low-level passthrough: orimem journal|write|lifecycle --help')
     sub = p.add_subparsers(dest='command', required=True)
 
     s = sub.add_parser('init', help='first-time setup: config, vault, model, agent integration')
     s.add_argument('--vault')
     s.add_argument('--capture', choices=['on', 'off'])
     s.add_argument('--daily', choices=['on', 'off', 'ask'])
-    s.add_argument('--agents', help='comma list of claude,codex,dsh; default: auto-detect')
+    s.add_argument('--agents', help='comma list of claude,codex,dsh, or none; default: auto-detect')
+    s.add_argument('--dsh-profile', action='append', help='only patch these dsh profiles (default: all)')
     s.add_argument('--no-hooks', action='store_true')
     s.add_argument('--skip-model', action='store_true')
     s.add_argument('--model-from', help='import an existing local copy of the pinned model')
@@ -226,6 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
     for name, fn in (('install', cmd_install), ('uninstall', cmd_uninstall)):
         s = sub.add_parser(name, help=f'{name} MCP server, skill and hooks for agents')
         s.add_argument('--agent', help='comma list of claude,codex,dsh; default: auto-detect')
+        s.add_argument('--dsh-profile', action='append', help='only patch these dsh profiles (default: all)')
         if name == 'install':
             s.add_argument('--no-hooks', action='store_true')
         s.set_defaults(fn=fn)
@@ -288,6 +293,12 @@ PASSTHROUGH = {
 
 def main(argv=None) -> None:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if len(argv) >= 2 and argv[0] == '--home':
+        # Explicit home for processes started by agents/schedulers that may not inherit ORIMEM_HOME.
+        import os
+        os.environ['ORIMEM_HOME'] = str(Path(argv[1]).expanduser().resolve())
+        config.reload()
+        argv = argv[2:]
     if argv and argv[0] in PASSTHROUGH:
         from importlib import import_module
         sys.argv = ['orimem ' + argv[0]] + argv[1:]

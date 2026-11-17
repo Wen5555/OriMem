@@ -69,7 +69,8 @@ def _self_command() -> list[str]:
     if os.name == 'nt':
         windowless = os.path.join(os.path.dirname(exe), 'pythonw.exe')
         exe = windowless if os.path.exists(windowless) else exe
-    return [exe, '-X', 'utf8', '-m', 'orimem', 'daily', 'run']
+    from orimem.adapters import base_args
+    return [exe] + base_args() + ['daily', 'run']
 
 
 def apply_schedule() -> dict:

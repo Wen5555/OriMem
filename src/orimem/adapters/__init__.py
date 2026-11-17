@@ -19,7 +19,7 @@ from pathlib import Path
 from orimem import config
 
 AGENTS = ('claude', 'codex', 'dsh')
-SKILL_NAME = 'OriMem'
+SKILL_NAME = 'orimem'
 BEGIN = '# >>> orimem >>>'
 END = '# <<< orimem <<<'
 HOOK_EVENTS = ('SessionStart', 'UserPromptSubmit', 'Stop')
@@ -29,12 +29,20 @@ def python_exe() -> str:
     return sys.executable
 
 
+def base_args() -> list[str]:
+    args = ['-X', 'utf8', '-m', 'orimem']
+    if os.environ.get('ORIMEM_HOME'):
+        args += ['--home', str(config.home())]
+    return args
+
+
 def mcp_command() -> tuple[str, list[str]]:
-    return python_exe(), ['-X', 'utf8', '-m', 'orimem', 'mcp']
+    return python_exe(), base_args() + ['mcp']
 
 
 def hook_command(agent: str) -> str:
-    return f'"{python_exe()}" -X utf8 -m orimem hook --agent {agent}'
+    quoted = ' '.join(f'"{a}"' if ' ' in a else a for a in base_args())
+    return f'"{python_exe()}" {quoted} hook --agent {agent}'
 
 
 def skill_source() -> Path:
@@ -54,9 +62,13 @@ class Backup:
 
 
 def _write_text(path: Path, text: str) -> None:
+    """Atomic write that keeps the file's existing line endings (LF unless it was CRLF)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + '.orimem-tmp')
-    tmp.write_text(text, encoding='utf-8')
+    crlf = path.exists() and b"\r\n" in path.read_bytes()
+    newline = "\r\n" if crlf else "\n"
+    tmp = path.with_name(path.name + ".orimem-tmp")
+    with open(tmp, "w", encoding="utf-8", newline="") as f:
+        f.write(text.replace("\r\n", "\n").replace("\n", newline))
     os.replace(tmp, path)
 
 
@@ -84,7 +96,8 @@ def uninstall_skill(target_root: Path) -> bool:
 # ---- Claude-style hooks JSON (Claude settings.json, Codex hooks.json, dsh bridge file) ----
 
 def _is_ours(hook: dict) -> bool:
-    return '-m orimem hook' in str(hook.get('command', '')) + str(hook.get('commandWindows', ''))
+    text = str(hook.get('command', '')) + str(hook.get('commandWindows', ''))
+    return '-m orimem' in text and 'hook --agent' in text
 
 
 def merge_hooks(data: dict, agent: str, windows_key: bool = False) -> dict:
@@ -226,9 +239,14 @@ def uninstall_codex(backup: Backup) -> dict:
 
 # ---- DeepSeek Harness (dsh) -------------------------------------------------------
 
-def dsh_paths() -> dict:
+def dsh_paths(only=None) -> dict:
     home = Path(os.environ.get('DSH_HOME') or Path.home() / '.dsh')
     profiles = sorted(p for p in (home / 'profiles').glob('*/cordis.patch.yml')) if (home / 'profiles').is_dir() else []
+    if only:
+        missing = set(only) - {p.parent.name for p in profiles}
+        if missing:
+            raise RuntimeError('dsh profile(s) not found: ' + ', '.join(sorted(missing)))
+        profiles = [p for p in profiles if p.parent.name in set(only)]
     return dict(home=home, skills=home / 'skills', patches=profiles,
                 hooks=config.home() / 'dsh-hooks.json')
 
@@ -265,9 +283,12 @@ def _patch_text_with_block(text: str, block: str) -> str:
     return body.rstrip('\n') + '\n' + block + '\n'
 
 
-def install_dsh(backup: Backup, hooks: bool) -> dict:
+def install_dsh(backup: Backup, hooks: bool, profiles=None, dsh_hooks: bool = False) -> dict:
+    """dsh runs hook commands inside its own workspace sandbox, where they cannot write OriMem's
+    data, so capture is done by the MCP service's periodic scan; the hook bridge is opt-in."""
     import yaml
-    p = dsh_paths()
+    hooks = hooks and dsh_hooks
+    p = dsh_paths(profiles)
     if not p['home'].exists():
         raise RuntimeError('DeepSeek Harness home not found: ' + str(p['home']))
     if not p['patches']:
@@ -293,8 +314,8 @@ def install_dsh(backup: Backup, hooks: bool) -> dict:
     return dict(mcp_and_hooks=written, skill=install_skill(p['skills']), hooks_file=str(hooks_file) if hooks_file else None)
 
 
-def uninstall_dsh(backup: Backup) -> dict:
-    p = dsh_paths()
+def uninstall_dsh(backup: Backup, profiles=None) -> dict:
+    p = dsh_paths(profiles)
     for patch in p['patches']:
         text = patch.read_text(encoding='utf-8')
         if BEGIN in text:
@@ -303,9 +324,10 @@ def uninstall_dsh(backup: Backup) -> dict:
             if not [l for l in body.splitlines() if l.strip() and not l.lstrip().startswith('#')]:
                 body += '[]\n'
             _write_text(patch, body)
-    if p['hooks'].exists():
+    still_used = any(BEGIN in q.read_text(encoding='utf-8') for q in dsh_paths()['patches'])
+    if p['hooks'].exists() and not still_used:
         p['hooks'].unlink()
-    return dict(skill=uninstall_skill(p['skills']))
+    return dict(skill=uninstall_skill(p['skills']) if not still_used else False)
 
 
 try:
@@ -329,24 +351,26 @@ def detect() -> dict:
     )
 
 
-def install(agents, hooks: bool = True) -> dict:
+def install(agents, hooks: bool = True, dsh_profiles=None) -> dict:
     backup = Backup()
     out = {}
     for agent in agents:
         try:
-            out[agent] = globals()['install_' + agent](backup, hooks)
+            extra = dict(profiles=dsh_profiles) if agent == 'dsh' else {}
+            out[agent] = globals()['install_' + agent](backup, hooks, **extra)
         except Exception as error:
             out[agent] = dict(error=str(error))
     out['backup_dir'] = str(backup.dir) if backup.dir.exists() else None
     return out
 
 
-def uninstall(agents) -> dict:
+def uninstall(agents, dsh_profiles=None) -> dict:
     backup = Backup()
     out = {}
     for agent in agents:
         try:
-            out[agent] = globals()['uninstall_' + agent](backup)
+            extra = dict(profiles=dsh_profiles) if agent == 'dsh' else {}
+            out[agent] = globals()['uninstall_' + agent](backup, **extra)
         except Exception as error:
             out[agent] = dict(error=str(error))
     out['backup_dir'] = str(backup.dir) if backup.dir.exists() else None

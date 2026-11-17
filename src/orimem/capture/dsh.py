@@ -1,7 +1,7 @@
 """DeepSeek Harness (dsh) source: ~/.dsh/sessions/<workspace>/<session>/session.v4.jsonl.zstd.
 
 The log is a zstd-compressed JSONL stream: one ``session`` header record, then
-events ``{seq, time, type, data}``. Only ``user/message`` (data is the message)
+events ``{seq, time, type, data}``. Only ``user/message`` typed by the person (source.kind == 'user'; data is the message)
 and ``assistant/message`` (data.message) text blocks are kept; ``surfaceOp``
 replace ranges (compaction/rewrites) are applied so the mirror follows the
 visible transcript. Seeded/forked sessions keep only their own events.
@@ -22,7 +22,9 @@ NAMESPACE = 'dsh-session-adapter-v1'
 PARSER = 'dsh-session-v4'
 PREFIX = 'dsh-'
 INJECTED = ('<system-reminder>', '<environment_context>', '# AGENTS.md instructions', '<user-prompt-submit-hook>')
-SKIP_USER_SOURCES = {'hook', 'system', 'system-prompt', 'compaction', 'tool', 'reminder', 'agent'}
+# dsh injects runtime context, skill catalogs etc. as user/message with other source kinds;
+# only messages the person actually typed carry source.kind == 'user'.
+USER_SOURCES = {'user'}
 
 
 def root() -> Path:
@@ -87,7 +89,7 @@ def parse(path: Path):
         if kind == 'user/message':
             message, role = data, 'user'
             source = (message.get('source') or {}).get('kind') if isinstance(message.get('source'), dict) else None
-            if source in SKIP_USER_SOURCES:
+            if source not in USER_SOURCES:
                 stats['skipped'] += 1
                 continue
         elif kind == 'assistant/message':

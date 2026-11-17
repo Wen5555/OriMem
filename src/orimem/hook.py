@@ -30,7 +30,7 @@ def _spawn_capture(agent: str, transcript: str | None) -> None:
     if os.name == 'nt':
         windowless = os.path.join(os.path.dirname(exe), 'pythonw.exe')
         exe = windowless if os.path.exists(windowless) else exe
-    args = [exe, '-X', 'utf8', '-m', 'orimem', 'capture', '--source', agent, '--delay', '3']
+    args = [exe, '-X', 'utf8', '-m', 'orimem', '--home', str(config.home()), 'capture', '--source', agent, '--delay', '3']
     if transcript:
         args += ['--path', transcript]
     flags = 0

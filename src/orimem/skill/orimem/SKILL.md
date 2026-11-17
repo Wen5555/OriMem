@@ -1,5 +1,5 @@
 ---
-name: OriMem
+name: orimem
 description: "OriMem 本地记忆：用 Obsidian 库作为长期记忆，跨会话召回项目背景、历史对话与已有知识，并在确认结果后按验收流程写回项目页、日记和知识；自动采集 Claude Code / Codex / DeepSeek Harness 对话。需要背景、回忆过去讨论、记录结论或整理知识时使用。"
 ---
 
