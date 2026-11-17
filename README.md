@@ -36,6 +36,16 @@ Coding agents forget everything when a session ends, and each agent keeps its hi
 
 ## Quick start
 
+**Let your agent install it** (recommended). Paste this into Claude Code, Codex, DeepSeek Harness or any coding agent:
+
+```text
+Install and set up OriMem for me by following https://raw.githubusercontent.com/Wen5555/OriMem/main/llms-install.md
+```
+
+The agent asks you four questions (vault folder, folder language, capture, search mode), installs without further prompts, connects every agent it finds, verifies with `orimem doctor` and tells you what to restart. The steps it follows are in [llms-install.md](llms-install.md).
+
+**Or run the installer yourself:**
+
 **Windows (PowerShell)**
 
 ```powershell

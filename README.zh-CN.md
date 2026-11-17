@@ -34,6 +34,16 @@
 
 ## 快速开始
 
+**让 agent 帮你装**（推荐）。把下面这句话发给 Claude Code、Codex、DeepSeek Harness 或任意编程 agent：
+
+```text
+请按照 https://raw.githubusercontent.com/Wen5555/OriMem/main/llms-install.md 帮我安装并配置 OriMem
+```
+
+agent 会先问你四个问题（库放在哪里、目录语言、是否采集对话、检索模式），之后全程无需再确认：安装、接入检测到的所有 agent、用 `orimem doctor` 自检，最后告诉你需要重启什么。它遵循的步骤见 [llms-install.md](llms-install.md)。
+
+**也可以自己运行安装脚本：**
+
 **Windows（PowerShell）**
 
 ```powershell
