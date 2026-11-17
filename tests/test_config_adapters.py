@@ -116,3 +116,13 @@ def test_hook_session_ids_and_service_fallback(env, monkeypatch):
     assert spawned == [('dsh', 'session-abc', None)]
     monkeypatch.setattr(hook, '_notify_service', lambda args: True)
     assert hook.request_capture('dsh', 'session-abc', None) == 'service'
+
+
+def test_cli_output_survives_non_utf8_pipe(env, tmp_path):
+    import os, subprocess, sys
+    environment = dict(os.environ, PYTHONIOENCODING='cp1252', PYTHONUTF8='0',
+                       PYTHONPATH=str(__import__('conftest').SRC))
+    result = subprocess.run([sys.executable, '-m', 'orimem', 'config', 'get', 'layout.folders'],
+                            capture_output=True, env=environment)
+    assert result.returncode == 0, result.stderr
+    assert '收件箱' in result.stdout.decode('utf-8')

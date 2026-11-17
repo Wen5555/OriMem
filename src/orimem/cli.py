@@ -11,6 +11,15 @@ from pathlib import Path
 from orimem import config
 
 
+def _utf8_streams() -> None:
+    """Pipes/redirects on Windows default to the ANSI code page (e.g. cp1252), which cannot encode
+    note titles or paths in other scripts. Use UTF-8 there (Windows consoles already report UTF-8)."""
+    for stream in (sys.stdout, sys.stderr, sys.stdin):
+        encoding = (getattr(stream, 'encoding', '') or '').lower().replace('-', '')
+        if encoding != 'utf8' and hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8')
+
+
 def _print(value) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
@@ -309,6 +318,7 @@ PASSTHROUGH = {
 
 
 def main(argv=None) -> None:
+    _utf8_streams()
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) >= 2 and argv[0] == '--home':
         # Explicit home for processes started by agents/schedulers that may not inherit ORIMEM_HOME.
