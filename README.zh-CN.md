@@ -82,6 +82,8 @@ orimem init
 | **DeepSeek Harness（dsh）** | profile 的 `cordis.patch.yml` 中插入 `dsh-mcp-client` | `~/.dsh/skills/orimem` | `dsh-hooks-claude-code` 桥接 | `~/.dsh/sessions/**/session.v4.jsonl.zstd` |
 | 其他 MCP 客户端 | `orimem snippet` 输出配置 JSON | 复制技能目录 | — | — |
 
+**DeepSeek Harness 用户**也可以在社区插件市场里安装 [`dsh-orimem`](integrations/dsh) 插件包，或者从 [Release](https://github.com/Wen5555/OriMem/releases) 下载后运行 `dsh plugin --profile <名称> add dsh-orimem-<版本>.tgz`。插件包依赖快速开始里装好的 `orimem` 命令。
+
 `orimem install` 和 `orimem uninstall` 只增删 OriMem 自己的条目，修改前都会先备份。TOML/YAML 文件里的标记块会被逐字节移除；JSON 文件中的其他内容保持不变。
 
 ## 工作原理

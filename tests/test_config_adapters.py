@@ -126,3 +126,31 @@ def test_cli_output_survives_non_utf8_pipe(env, tmp_path):
                             capture_output=True, env=environment)
     assert result.returncode == 0, result.stderr
     assert '收件箱' in result.stdout.decode('utf-8')
+
+
+def test_dsh_profile_with_market_bundle_is_not_patched(env):
+    from orimem import adapters
+    profile = env['home'] / '.dsh' / 'profiles' / 'desktop'
+    profile.mkdir(parents=True)
+    (profile / 'cordis.patch.yml').write_bytes(b'[]\n')
+    (profile / 'package.json').write_text(json.dumps(
+        {'dsh': {'profile': {'bundles': ['@deepseek-ai/dsh-base', 'dsh-orimem']}}}), encoding='utf-8')
+    out = adapters.install(['dsh'])
+    assert out['dsh']['mcp_and_hooks'] == [] and out['dsh']['via_bundle'] == [str(profile)]
+    assert (profile / 'cordis.patch.yml').read_bytes() == b'[]\n'
+    assert (env['tmp'] / 'orimem' / 'dsh-hooks.json').exists()       # the bundle reads this file
+    adapters.uninstall(['dsh'])
+    assert (env['tmp'] / 'orimem' / 'dsh-hooks.json').exists()       # still used by the bundle
+
+
+def test_dsh_bundle_manifest_is_valid():
+    import yaml
+    from pathlib import Path
+    from orimem import adapters
+    root = Path(__file__).resolve().parents[1] / 'integrations' / 'dsh'
+    manifest = json.loads((root / 'package.json').read_text(encoding='utf-8'))
+    assert manifest['name'] == adapters.DSH_BUNDLE and manifest['dsh']['bundle']['patch'] == './cordis.patch.yml'
+    assert 'dsh-plugin' in manifest['keywords']
+    patch = yaml.load((root / 'cordis.patch.yml').read_text(encoding='utf-8'), Loader=adapters._DshLoader)
+    ids = [e['id'] for e in patch[0]['insert']]
+    assert ids == ['orimem-mcp', 'orimem-hooks']

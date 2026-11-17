@@ -1,0 +1,18 @@
+# dsh bundle patch for OriMem (https://github.com/Wen5555/OriMem).
+# Requires the `orimem` command on PATH (see README). Both entries use dsh's own plugins:
+# - dsh-mcp-client starts `orimem mcp` (server name `orimem`, tools mcp__orimem__*);
+# - dsh-hooks-claude-code runs the hooks file that `orimem init` writes to ~/.orimem/dsh-hooks.json
+#   (a missing file only logs a warning; the MCP server still works and captures every 2 minutes).
+- insert:
+    - id: orimem-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: orimem
+        transport: stdio
+        command: orimem
+        args: ['mcp']
+        toolCallTimeoutMs: 240000
+    - id: orimem-hooks
+      name: '@deepseek-ai/dsh-hooks-claude-code'
+      config:
+        configPath: !!js "(process.env.ORIMEM_HOME || ((process.env.USERPROFILE || process.env.HOME) + '/.orimem')) + '/dsh-hooks.json'"

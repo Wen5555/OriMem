@@ -78,6 +78,8 @@ Non-interactive: `orimem init --yes --vault ~/Notes --agents claude,codex`. Behi
 | **DeepSeek Harness (dsh)** | `dsh-mcp-client` entry in the profile's `cordis.patch.yml` | `~/.dsh/skills/orimem` | `dsh-hooks-claude-code` bridge | `~/.dsh/sessions/**/session.v4.jsonl.zstd` |
 | Any other MCP client | `orimem snippet` prints the JSON | copy the skill folder | — | — |
 
+**DeepSeek Harness users** can also add the [`dsh-orimem`](integrations/dsh) bundle from the community plugin market (or `dsh plugin --profile <name> add dsh-orimem-<version>.tgz` from a [release](https://github.com/Wen5555/OriMem/releases)); it needs the `orimem` command from the quick start.
+
 `orimem install` and `orimem uninstall` only add or remove OriMem's own entries, and every edited file is backed up first. Marker blocks in TOML/YAML files are removed byte for byte; JSON files keep all other content.
 
 ## How it works

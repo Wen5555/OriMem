@@ -11,3 +11,5 @@ venv/
 *.db-wal
 *.db-shm
 .venv/
+integrations/dsh/*.tgz
+dist/

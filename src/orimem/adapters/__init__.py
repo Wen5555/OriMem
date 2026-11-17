@@ -296,6 +296,19 @@ def _patch_text_with_block(text: str, block: str) -> str:
     return body.rstrip('\n') + '\n' + block + '\n'
 
 
+DSH_BUNDLE = 'dsh-orimem'
+
+
+def dsh_profile_has_bundle(patch: Path) -> bool:
+    """True when the profile already loads OriMem through the dsh-orimem market bundle."""
+    try:
+        manifest = json.loads((patch.parent / 'package.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return False
+    bundles = ((manifest.get('dsh') or {}).get('profile') or {}).get('bundles') or []
+    return DSH_BUNDLE in bundles or DSH_BUNDLE in (manifest.get('dependencies') or {})
+
+
 def install_dsh(backup: Backup, hooks: bool, profiles=None) -> dict:
     """dsh runs hook commands through its session shell (and sandbox). The OriMem hook therefore
     never writes itself: it asks the running OriMem service to capture, and the service's
@@ -311,8 +324,14 @@ def install_dsh(backup: Backup, hooks: bool, profiles=None) -> dict:
         hooks_file = p['hooks']
         _write_text(hooks_file, json.dumps(merge_hooks({}, 'dsh'), ensure_ascii=False, indent=2) + '\n')
     block = dsh_block(hooks_file)
-    written = []
+    written, via_bundle = [], []
     for patch in p['patches']:
+        if dsh_profile_has_bundle(patch):
+            via_bundle.append(str(patch.parent))     # the bundle inserts MCP + hooks itself
+            if BEGIN in patch.read_text(encoding='utf-8'):
+                backup.save(patch)
+                _write_text(patch, _strip_block(patch.read_text(encoding='utf-8')).rstrip('\n') + '\n')
+            continue
         original = patch.read_text(encoding='utf-8')
         backup.save(patch)
         new = _patch_text_with_block(original, block)
@@ -324,7 +343,8 @@ def install_dsh(backup: Backup, hooks: bool, profiles=None) -> dict:
             raise RuntimeError(f'Refusing to write {patch}: result would not parse ({error})')
         _write_text(patch, new)
         written.append(str(patch))
-    return dict(mcp_and_hooks=written, skill=install_skill(p['skills']), hooks_file=str(hooks_file) if hooks_file else None)
+    return dict(mcp_and_hooks=written, via_bundle=via_bundle, skill=install_skill(p['skills']),
+                hooks_file=str(hooks_file) if hooks_file else None)
 
 
 def uninstall_dsh(backup: Backup, profiles=None) -> dict:
@@ -337,7 +357,7 @@ def uninstall_dsh(backup: Backup, profiles=None) -> dict:
             if not [l for l in body.splitlines() if l.strip() and not l.lstrip().startswith('#')]:
                 body += '[]\n'
             _write_text(patch, body)
-    still_used = any(BEGIN in q.read_text(encoding='utf-8') for q in dsh_paths()['patches'])
+    still_used = any(BEGIN in q.read_text(encoding='utf-8') or dsh_profile_has_bundle(q) for q in dsh_paths()['patches'])
     if p['hooks'].exists() and not still_used:
         p['hooks'].unlink()
     return dict(skill=uninstall_skill(p['skills']) if not still_used else False)
