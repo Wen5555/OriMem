@@ -4,8 +4,10 @@
 
 ## 0. 准备
 
+用 README 里的一键安装脚本，或者：
+
 ```bash
-pip install git+https://github.com/Wen5555/OriMem.git
+uv tool install git+https://github.com/Wen5555/OriMem.git
 ```
 
 ```bash

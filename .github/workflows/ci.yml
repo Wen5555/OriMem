@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install
+        run: |
+          uv venv --python ${{ matrix.python }}
+          uv pip install -e ".[test]"
+      - name: Unit and integration tests
+        run: uv run --no-sync pytest -q
+      - name: CLI smoke test
+        shell: bash
+        run: |
+          export ORIMEM_HOME="$RUNNER_TEMP/orimem-home"
+          uv run --no-sync orimem init --yes --vault "$RUNNER_TEMP/vault" --agents none --skip-model
+          uv run --no-sync orimem doctor
+          uv run --no-sync orimem snippet
+
+  install-script:
+    name: installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    env:
+      ORIMEM_SOURCE: ${{ github.workspace }}
+      ORIMEM_NO_MODIFY_PATH: "1"
+      ORIMEM_MIRROR: none
+      ORIMEM_INIT_ARGS: "--yes --agents none --skip-model"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run install.sh
+        if: runner.os != 'Windows'
+        run: |
+          export ORIMEM_HOME="$RUNNER_TEMP/orimem-home"
+          sh scripts/install.sh
+          "$(uv tool dir --bin)/orimem" doctor
+      - name: Run install.ps1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:ORIMEM_HOME = "$env:RUNNER_TEMP\orimem-home"
+          ./scripts/install.ps1
+          & "$((uv tool dir --bin).Trim())\orimem.exe" doctor

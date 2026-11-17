@@ -15,8 +15,11 @@ def _print(value) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
 
 
+ASSUME_DEFAULTS = False
+
+
 def _ask(question: str, default: str) -> str:
-    if not sys.stdin.isatty():
+    if ASSUME_DEFAULTS or not sys.stdin.isatty():
         return default
     answer = input(f'{question} [{default}]: ').strip()
     return answer or default
@@ -57,6 +60,8 @@ def scaffold_vault(vault: Path) -> list[str]:
 
 def cmd_init(a) -> None:
     from orimem import adapters, daily, model
+    global ASSUME_DEFAULTS
+    ASSUME_DEFAULTS = a.yes
     existing = config.CONFIG_PATH.exists()
     data = {}
     if existing:
@@ -85,7 +90,7 @@ def cmd_init(a) -> None:
     out['vault_created'] = scaffold_vault(config.vault())
     if not a.skip_model:
         try:
-            out['model'] = model.import_from(Path(a.model_from)) if a.model_from else model.download(a.hf_endpoint)
+            out['model'] = model.import_from(Path(a.model_from)) if a.model_from else model.download(a.hf_endpoint, torch=a.torch)
         except Exception as error:
             out['model'] = dict(error=str(error), hint='稍后运行 orimem model download 或 orimem model import <目录>')
     agents = _agents(a.agents)
@@ -157,7 +162,7 @@ def cmd_daily(a) -> None:
 def cmd_model(a) -> None:
     from orimem import model
     if a.action == 'download':
-        _print(model.download(a.endpoint))
+        _print(model.download(a.endpoint, torch=a.torch))
     elif a.action == 'import':
         if not a.path:
             raise SystemExit('usage: orimem model import <dir>')
@@ -170,8 +175,14 @@ def cmd_doctor(a) -> None:
     from orimem import adapters, daily, model
     import importlib.util
     deps = {m: importlib.util.find_spec(m) is not None
-            for m in ('numpy', 'torch', 'transformers', 'watchdog', 'jsonschema', 'yaml', 'zstandard', 'requests')}
-    out = dict(home=str(config.home()), config_exists=config.CONFIG_PATH.exists(), vault=str(config.vault()),
+            for m in ('numpy', 'onnxruntime', 'tokenizers', 'watchdog', 'jsonschema', 'yaml', 'zstandard', 'requests',
+                      'torch', 'transformers')}
+    from orimem.core.embedding import choose_backend
+    try:
+        backend = choose_backend(model.model_dir())
+    except RuntimeError as error:
+        backend = str(error)
+    out = dict(home=str(config.home()), config_exists=config.CONFIG_PATH.exists(), vault=str(config.vault()), embedder=backend,
                vault_exists=config.vault().is_dir(), db_exists=config.db().exists(), model=model.status(),
                dependencies=deps, agents_detected=adapters.detect(), capture=config.get('capture'),
                daily_summary=daily.status())
@@ -226,7 +237,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument('--no-hooks', action='store_true')
     s.add_argument('--skip-model', action='store_true')
     s.add_argument('--model-from', help='import an existing local copy of the pinned model')
-    s.add_argument('--hf-endpoint', help='e.g. https://hf-mirror.com')
+    s.add_argument('--hf-endpoint', help='model download endpoint; default tries huggingface.co then hf-mirror.com')
+    s.add_argument('--torch', action='store_true', help='also download PyTorch weights (needs orimem[torch])')
+    s.add_argument('-y', '--yes', action='store_true', help='accept defaults for every question')
     s.set_defaults(fn=cmd_init)
 
     for name, fn in (('install', cmd_install), ('uninstall', cmd_uninstall)):
@@ -263,6 +276,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument('action', choices=['status', 'download', 'import'], nargs='?', default='status')
     s.add_argument('path', nargs='?')
     s.add_argument('--endpoint')
+    s.add_argument('--torch', action='store_true', help='also fetch PyTorch weights')
     s.set_defaults(fn=cmd_model)
 
     s = sub.add_parser('doctor', help='show installation status')
