@@ -97,7 +97,6 @@ def sensitive_key(key):
 
 
 def redact(text):
-    text = re.sub(r"\\u([0-9a-fA-F]{4})", lambda m: chr(int(m[1], 16)), text)
     text = re.sub("[\ud800-\udfff\x00]", "", text).replace("\ufffd", "[INVALID SOURCE CHARACTER]")
     for pattern, replacement in PATTERNS:
         text = pattern.sub(replacement, text)

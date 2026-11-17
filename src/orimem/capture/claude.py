@@ -137,21 +137,31 @@ def parse(path):
     return session, events, stats
 
 
-def capture_file(path: Path) -> dict:
-    path = Path(path)
-    session_uuid = path.stem
-    sid = PREFIX + session_uuid
-    session, events, stats = parse(path)
-    db = common.adapter_db(NAME)
-    reason = None
+def skip_reason(session, events):
     if any(e.startswith('sdk') for e in session['entrypoints']):
-        reason = 'non-interactive sdk session excluded'
-    elif session['scheduled']:
-        reason = 'scheduled-task session excluded'
-    elif common.excluded_cwd(session['cwd']):
-        reason = 'cwd excluded by capture.exclude_cwd'
-    elif not events:
-        reason = 'no ordinary messages observed yet'
+        return 'non-interactive sdk session excluded'
+    if session['scheduled']:
+        return 'scheduled-task session excluded'
+    if common.excluded_cwd(session['cwd']):
+        return 'cwd excluded by capture.exclude_cwd'
+    if not events:
+        return 'no ordinary messages observed yet'
+    return None
+
+
+def session_id(path, session):
+    return PREFIX + Path(path).stem
+
+
+def capture_file(path: Path, only_cwd=None) -> dict:
+    path = Path(path)
+    session, events, stats = parse(path)
+    sid = session_id(path, session)
+    if only_cwd is not None and not common.within(session['cwd'], only_cwd):
+        # Onboarding imports selected workspaces only; leave every other mirror untouched.
+        return dict(captured=False, skipped=True, session_id=sid, reason='outside the selected workspaces')
+    db = common.adapter_db(NAME)
+    reason = skip_reason(session, events)
     if reason:
         common.forget_session(db, sid)
         return dict(captured=False, session_id=sid, reason=reason, format=session['format'])

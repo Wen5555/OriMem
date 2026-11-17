@@ -32,14 +32,26 @@ DEFAULTS: dict = {
         "language": "",                # zh | en; set by `orimem init`
         "inbox": "", "drafts": "", "projects": "", "courses": "", "areas": "", "knowledge": "",
         "journal": "", "daily": "", "weekly": "", "archive": "", "evidence": "", "legacy": "",
-        "workspace": "", "course_home": "", "weekly_note": "", "knowledge_index": "",
+        "workspace": "", "course_home": "", "weekly_note": "", "knowledge_index": "", "profile": "",
         "project_scopes": [],          # [] -> [projects, courses]
         "extra_writable": [],          # further folders automatic write-back may touch
     },
     "recall": {
         "mode": "hybrid",              # hybrid (vectors + full text, needs the model) | lexical (no model)
-        "model": "intfloat/multilingual-e5-small",
         "hf_endpoint": "",             # e.g. https://hf-mirror.com
+    },
+    "projects": {
+        "link": "auto",                # auto: create the project page for a new project folder | offer: suggest once | off
+        "import_history": True,        # auto-link also imports that folder's conversations from before the install
+        "record": True,                # remind agents to keep the linked project page up to date during sessions
+    },
+    "profile": {
+        "share": True,                 # give every agent the vault-root profile note at session start
+        "max_chars": 1500,
+    },
+    "maintenance": {
+        "backup_days": 30,             # keep write-back backups / finished batch records this long
+        "projection_backup_days": 3,   # backups of auto-generated transcript notes are kept only briefly
     },
     "mcp": {
         "tools": "core",               # core (8 everyday tools) | all (also the advanced ones)
@@ -55,6 +67,9 @@ DEFAULTS: dict = {
 HOME = Path(os.environ.get("ORIMEM_HOME") or Path.home() / ".orimem").expanduser()
 CONFIG_PATH = HOME / "config.toml"
 _cache: dict | None = None
+_stamp = None
+# Set once by `orimem init`; every verified write checks against it, so it is not user-settable.
+READ_ONLY = {"journal_from"}
 
 
 def _merge(base: dict, extra: dict) -> dict:
@@ -67,14 +82,35 @@ def _merge(base: dict, extra: dict) -> dict:
     return out
 
 
+def _file_stamp():
+    try:
+        st = CONFIG_PATH.stat()
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
 def load() -> dict:
-    global _cache
-    if _cache is None:
+    """Current settings. Re-read whenever config.toml changes, so a long-running service follows
+    `orimem config set` / `config_set` immediately."""
+    global _cache, _stamp
+    stamp = _file_stamp()
+    if _cache is None or stamp != _stamp:
         data = {}
-        if CONFIG_PATH.exists():
+        if stamp is not None:
             data = tomllib.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        _cache = _merge(DEFAULTS, data)
+        merged = _merge(DEFAULTS, data)
+        if stamp is None:
+            # Not set up yet (`orimem mcp` started by a plugin or registry entry before `orimem init`):
+            # never capture, and use the system language instead of the 0.1.x layout.
+            merged["capture"]["enabled"] = False
+            merged["layout"]["language"] = detect_language()
+        _cache, _stamp = merged, stamp
     return _cache
+
+
+def configured() -> bool:
+    return CONFIG_PATH.exists()
 
 
 def reload() -> dict:
@@ -102,6 +138,38 @@ def parse_value(text: str):
         return text
 
 
+_TRUE, _FALSE = ("true", "yes", "on", "1"), ("false", "no", "off", "0")
+
+
+def _coerce(key: str, value, default):
+    """Validate a setting against the type of its default; accept "true"/"false" strings for switches."""
+    if key == "daily_summary.enabled":
+        if isinstance(value, str) and value.lower() in _TRUE + _FALSE:
+            return value.lower() in _TRUE
+        return value
+    if isinstance(default, bool):
+        if isinstance(value, str) and value.strip().lower() in _TRUE + _FALSE:
+            return value.strip().lower() in _TRUE
+        if not isinstance(value, bool):
+            raise ValueError(f"{key} must be true or false")
+        return value
+    if isinstance(default, int):
+        if isinstance(value, str) and value.strip().isdigit():
+            value = int(value)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"{key} must be a non-negative whole number")
+        return value
+    if isinstance(default, list):
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise ValueError(f'{key} must be a list of strings, e.g. ["a", "b"]')
+        return value
+    if isinstance(default, str):
+        if not isinstance(value, str):
+            raise ValueError(f"{key} must be a string")
+        return value
+    raise ValueError(f"{key} is a group of settings, not a single value")
+
+
 def set_value(key: str, value) -> dict:
     data = {}
     if CONFIG_PATH.exists():
@@ -112,8 +180,22 @@ def set_value(key: str, value) -> dict:
         if not isinstance(known, dict) or part not in known:
             raise KeyError("Unknown setting: " + key)
         known = known[part]
+    if key in READ_ONLY:
+        raise ValueError(f"{key} is set once by `orimem init` and cannot be changed")
+    value = _coerce(key, value, known)
+    if key == "capture.sources" and set(value) - {"claude", "codex", "dsh"}:
+        raise ValueError("capture.sources may only contain claude, codex, dsh")
+    if key == "daily_summary.time" and not __import__("re").fullmatch(r"([01]\d|2[0-3]):[0-5]\d", value):
+        raise ValueError("daily_summary.time must be HH:MM (24-hour)")
+    if key == "capture.since" and value:
+        try:
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            raise ValueError("capture.since must be an ISO date/time, e.g. 2026-11-01T00:00:00+08:00") from None
     if key == "daily_summary.enabled" and value not in ("ask", True, False):
         raise ValueError('daily_summary.enabled must be "ask", true or false')
+    if key == "projects.link" and value not in ("auto", "offer", "off"):
+        raise ValueError('projects.link must be "auto", "offer" or "off"')
     if key == "mcp.tools" and value not in ("core", "all"):
         raise ValueError('mcp.tools must be "core" or "all"')
     if key == "recall.mode" and value not in ("hybrid", "lexical"):
@@ -157,11 +239,28 @@ def dumps(data: dict) -> str:
     return "\n".join(lines).lstrip("\n") + "\n"
 
 
-def save(data: dict) -> None:
+def ensure_home() -> Path:
+    """Create ORIMEM_HOME private to the user: it holds the service key, the index and captured chats."""
     HOME.mkdir(parents=True, exist_ok=True)
-    tmp = CONFIG_PATH.with_suffix(".tmp")
-    tmp.write_text(dumps(data), encoding="utf-8")
-    os.replace(tmp, CONFIG_PATH)
+    if os.name != "nt":
+        os.chmod(HOME, 0o700)
+    return HOME
+
+
+def write_private(path: Path, data: bytes) -> None:
+    """Atomic write readable only by the user (0600 on POSIX)."""
+    ensure_home()
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(data)
+    if os.name != "nt":
+        os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+
+
+def save(data: dict) -> None:
+    write_private(CONFIG_PATH, dumps(data).encode("utf-8"))
 
 
 # ---- derived paths -------------------------------------------------------
@@ -212,14 +311,14 @@ LAYOUTS: dict = {
         "areas": "20 长期领域", "knowledge": "30 知识", "journal": "50 日记", "daily": "50 日记/每日",
         "weekly": "50 日记/每周", "archive": "90 归档", "evidence": "90 归档/对话佐证", "legacy": "90 归档/旧文件",
         "workspace": "95 AI 工作区", "course_home": "课程主页", "weekly_note": "{week} 周复盘",
-        "knowledge_index": "30 知识/知识索引",
+        "knowledge_index": "30 知识/知识索引", "profile": "个人画像",
     },
     "en": {
         "inbox": "00 Inbox", "drafts": "00 Inbox/AI Drafts", "projects": "10 Projects", "courses": "15 Courses",
         "areas": "20 Areas", "knowledge": "30 Knowledge", "journal": "50 Journal", "daily": "50 Journal/Daily",
         "weekly": "50 Journal/Weekly", "archive": "90 Archive", "evidence": "90 Archive/Conversations",
         "legacy": "90 Archive/Legacy", "workspace": "95 AI Workspace", "course_home": "Course Home",
-        "weekly_note": "{week} Weekly Review", "knowledge_index": "30 Knowledge/Knowledge Index",
+        "weekly_note": "{week} Weekly Review", "knowledge_index": "30 Knowledge/Knowledge Index", "profile": "About Me",
     },
 }
 ROLES = tuple(LAYOUTS["zh"])
@@ -297,14 +396,17 @@ def project_scopes() -> list[str]:
 def writable() -> list[str]:
     """Folders automatic write-back may touch (journal only through daily/weekly)."""
     lay = layout()
-    base = [lay[r] for r in ("drafts", "projects", "courses", "knowledge", "daily", "weekly", "evidence", "workspace")]
+    # Evidence (capture only) and the profile note (explicit user request) are checked separately by the writer.
+    base = [lay[r] for r in ("drafts", "projects", "courses", "knowledge", "daily", "weekly", "workspace")]
     return base + [_check_rel(str(x)) for x in (get("layout.extra_writable") or [])]
 
 
 def folders() -> list[str]:
     """Every folder the layout names (for scaffolding)."""
     lay = layout()
-    found = {lay[r] for r in ROLES if r not in ("course_home", "weekly_note", "knowledge_index")}
+    found = {lay[r] for r in ROLES if r not in ("course_home", "weekly_note", "knowledge_index", "profile")}
+    if "/" in lay["profile"]:
+        found.add(lay["profile"].rsplit("/", 1)[0])
     if "/" in lay["knowledge_index"]:
         found.add(lay["knowledge_index"].rsplit("/", 1)[0])
     return sorted(found)

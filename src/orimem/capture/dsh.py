@@ -146,11 +146,29 @@ def parse(path: Path):
     return session, events, stats
 
 
-def capture_file(path: Path) -> dict:
+def skip_reason(session, events):
+    if session['format']['status'] == 'unsupported':
+        return session['format']['warnings'][0]
+    if session['delegated']:
+        return 'subagent (delegated) session excluded'
+    if common.excluded_cwd(session['cwd']):
+        return 'cwd excluded by capture.exclude_cwd'
+    if not events:
+        return 'no ordinary messages observed yet'
+    return None
+
+
+def session_id(path, session):
+    return PREFIX + str(session.get('id') or Path(path).parent.name).removeprefix('session-')
+
+
+def capture_file(path: Path, only_cwd=None) -> dict:
     path = Path(path)
     session, events, stats = parse(path)
-    ident = session.get('id') or path.parent.name
-    sid = PREFIX + str(ident).removeprefix('session-')
+    sid = session_id(path, session)
+    if only_cwd is not None and not common.within(session['cwd'], only_cwd):
+        # Onboarding imports selected workspaces only; leave every other mirror untouched.
+        return dict(captured=False, skipped=True, session_id=sid, reason='outside the selected workspaces')
     db = common.adapter_db(NAME)
     reason = None
     if session['format']['status'] == 'unsupported':

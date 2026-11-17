@@ -30,7 +30,10 @@ ASSUME_DEFAULTS = False
 def _ask(question: str, default: str) -> str:
     if ASSUME_DEFAULTS or not sys.stdin.isatty():
         return default
-    answer = input(f'{question} [{default}]: ').strip()
+    try:
+        answer = input(f'{question} [{default}]: ').strip()
+    except EOFError:            # e.g. stdin is NUL on Windows, which reports itself as a terminal
+        return default
     return answer or default
 
 
@@ -73,6 +76,16 @@ def scaffold_vault(vault: Path, obsidian_setup: bool = True) -> list[str]:
         created.append('AGENTS.md')
         if obsidian_setup:
             created += obsidian.first_run(vault, lay)
+    profile = vault / (lay['profile'] + '.md')
+    if not profile.exists():
+        # Also added to vaults set up before profiles existed; the untouched template is never shared.
+        templates = Path(__file__).resolve().parent / 'templates' / 'vault'
+        template = templates / f"profile.{lay['language']}.md"
+        if not template.exists():
+            template = templates / 'profile.en.md'
+        profile.parent.mkdir(parents=True, exist_ok=True)
+        profile.write_text(template.read_text(encoding='utf-8'), encoding='utf-8')
+        created.append(profile.relative_to(vault).as_posix())
     return created
 
 
@@ -141,9 +154,76 @@ def cmd_init(a) -> None:
             out['daily_schedule'] = daily.apply_schedule()
         except Exception as error:
             out['daily_schedule'] = dict(error=str(error))
-    from orimem import obsidian
+    from orimem import obsidian, upgrade
     out['obsidian'] = obsidian.status(config.vault(), config.layout()['language'])
-    _print(out)
+    if config.get('recall.mode') == 'lexical' or (isinstance(out.get('model'), dict) and out['model'].get('ready')):
+        try:
+            # Build the index now, so the first question an agent asks already has an answer.
+            result = _backend().sync()
+            out['index'] = dict(notes=result.get('changed', 0))
+        except Exception as error:
+            out['index'] = dict(error=str(error)[:300], hint='orimem sync')
+    upgrade.mark()
+    if a.json:
+        _print(out)
+    else:
+        print(_init_summary(out))
+
+
+def _init_summary(out: dict) -> str:
+    zh = out.get('language') == 'zh'
+    ok, bad = '✓', '✗'
+    lines = ['OriMem 已配置完成。' if zh else 'OriMem is set up.']
+    lines.append(('  库：      ' if zh else '  Vault:    ') + out['vault'] + f"  ({out.get('language')})")
+    model = out.get('model')
+    if out.get('recall_mode') == 'lexical':
+        search = '全文检索（不使用模型）' if zh else 'full text only (no model)'
+    elif isinstance(model, dict) and model.get('ready'):
+        search = ('混合检索（模型已就绪）' if zh else 'hybrid (model ready)')
+    else:
+        error = model.get('error') if isinstance(model, dict) else model
+        search = (f'{bad} 模型未就绪：{error}；稍后运行 orimem model download' if zh
+                  else f'{bad} model not ready: {error}; run `orimem model download` later')
+    lines.append(('  检索：    ' if zh else '  Search:   ') + search)
+    capture = (('开启' if zh else 'on') if out.get('capture') else ('关闭' if zh else 'off'))
+    daily = {True: '开启' if zh else 'on', False: '关闭' if zh else 'off'}.get(out.get('daily_summary'), '稍后询问' if zh else 'ask later')
+    lines.append(('  采集：    ' if zh else '  Capture:  ') + capture + ('    每日总结：' if zh else '    Daily summary: ') + daily)
+    agents = out.get('agents')
+    if isinstance(agents, dict):
+        parts = []
+        for name in ('claude', 'codex', 'dsh'):
+            if name in agents:
+                info = agents[name] or {}
+                parts.append(f"{name} {bad} {info['error'][:80]}" if 'error' in info else f'{name} {ok}')
+        lines.append(('  Agent：   ' if zh else '  Agents:   ') + ('  '.join(parts) or '-'))
+    else:
+        lines.append(('  Agent：   ' if zh else '  Agents:   ') + ('未接入（orimem install 可稍后接入）' if zh else 'none (connect later with `orimem install`)'))
+    obs = out.get('obsidian') or {}
+    lines.append(('  Obsidian：' if zh else '  Obsidian: ') + (obs.get('next_step') or ''))
+    index = out.get('index') or {}
+    if 'error' in index:
+        lines.append(('  索引：    ' if zh else '  Index:    ') + f"{bad} {index['error']}")
+    profile = config.layout()['profile'] + '.md'
+    lines.append('')
+    lines.append(('下一步：重启各个 agent；在库根目录的 “' + profile + '” 里写下希望所有 agent 记住的个人信息。') if zh else
+                 ('Next: restart your agents; write what every agent should know about you in "' + profile + '" at the vault root.'))
+    return '\n'.join(lines)
+
+
+def cmd_link(a) -> None:
+    from orimem import projects
+    _print(projects.link_workspace(_backend(), a.cwd or str(Path.cwd())))
+
+
+def cmd_onboard(a) -> None:
+    from orimem import onboard
+    sources = [a.source] if a.source else None
+    if a.action == 'scan':
+        _print(onboard.scan(days=a.days if a.days is not None else 90, sources=sources))
+    elif a.action == 'import':
+        _print(onboard.import_workspaces(a.cwd or [], days=a.days, sources=sources))
+    else:
+        _print(onboard.status())
 
 
 def cmd_open(a) -> None:
@@ -152,13 +232,21 @@ def cmd_open(a) -> None:
 
 
 def cmd_install(a) -> None:
-    from orimem import adapters
+    from orimem import adapters, upgrade
     _print(adapters.install(_agents(a.agent), hooks=not a.no_hooks, dsh_profiles=a.dsh_profile))
+    upgrade.mark()
 
 
 def cmd_uninstall(a) -> None:
-    from orimem import adapters
-    _print(adapters.uninstall(_agents(a.agent), dsh_profiles=a.dsh_profile))
+    from orimem import adapters, daily
+    out = adapters.uninstall(_agents(a.agent), dsh_profiles=a.dsh_profile)
+    if not a.agent:
+        # Removing OriMem from every agent also removes its scheduled daily job.
+        try:
+            out['daily_schedule'] = daily.apply_schedule(enabled=False)
+        except Exception as error:
+            out['daily_schedule'] = dict(error=str(error)[:200])
+    _print(out)
 
 
 def cmd_snippet(a) -> None:
@@ -202,7 +290,7 @@ def cmd_config(a) -> None:
         if a.key.startswith('layout.'):
             result['created'] = scaffold_vault(config.vault(), obsidian_setup=False)
             result['note'] = 'Existing notes are not moved; move them yourself if you renamed a folder.'
-        if a.key.startswith('recall.') or a.key.startswith('layout.') or a.key == 'mcp.tools':
+        if (a.key.startswith(('recall.', 'layout.', 'sources.')) or a.key in ('mcp.tools', 'vault', 'timezone')):
             from orimem.core.service import stop_service
             stop_service()
             result['service'] = 'restarted on next use'
@@ -233,6 +321,11 @@ def cmd_model(a) -> None:
         _print(model.status())
 
 
+def cmd_prune(a) -> None:
+    from orimem import maintenance
+    _print(dict(before_mb=maintenance.usage(), result=maintenance.prune(dry_run=a.dry_run)))
+
+
 def cmd_doctor(a) -> None:
     from orimem import adapters, daily, model
     import importlib.util
@@ -256,7 +349,67 @@ def cmd_doctor(a) -> None:
                vault_exists=config.vault().is_dir(), db_exists=config.db().exists(), model=model.status(),
                dependencies=deps, agents_detected=adapters.detect(), capture=config.get('capture'),
                daily_summary=daily.status())
-    _print(out)
+    from orimem import maintenance, upgrade
+    import orimem
+    out.update(version=orimem.__version__, installed_into=adapters.installed(), index=_index_stats(),
+               storage_mb=maintenance.usage(), configured=config.configured(), upgraded_to=upgrade.recorded())
+    if a.json:
+        _print(out)
+    else:
+        print(_doctor_summary(out))
+
+
+def _index_stats() -> dict:
+    import sqlite3
+    from contextlib import closing
+    db = config.db()
+    if not db.exists():
+        return dict(built=False)
+    try:
+        with closing(sqlite3.connect(db.as_uri() + '?mode=ro', uri=True)) as c:
+            notes = c.execute('SELECT count(*) FROM notes').fetchone()[0]
+            last = c.execute("SELECT value FROM meta WHERE key='last_sync'").fetchone()
+            model = c.execute("SELECT value FROM meta WHERE key='model'").fetchone()
+        return dict(built=bool(model), notes=notes, last_sync=json.loads(last[0]).get('at') if last else None)
+    except (sqlite3.Error, ValueError):
+        return dict(built=False)
+
+
+def _doctor_summary(out: dict) -> str:
+    ok, bad, warn = '✓', '✗', '!'
+    lines = [f"OriMem {out['version']}  ·  home {out['home']}"]
+    if not out['configured']:
+        lines.append(f'  {bad} not set up: run `orimem init`')
+    lines.append(f"  {ok if out['vault_exists'] else bad} vault  {out['vault']}  ({out['layout']['language']} layout)")
+    index = out['index']
+    lines.append(f"  {ok if index.get('built') else warn} index  " + (f"{index['notes']} notes, last sync {index.get('last_sync')}"
+                                                                 if index.get('built') else 'not built yet (`orimem sync`)'))
+    embedder = out['embedder']
+    search_ok = out['recall_mode'] == 'lexical' or embedder in ('onnx', 'torch')
+    lines.append(f"  {ok if search_ok else bad} search {out['recall_mode']}" + ('' if out['recall_mode'] == 'lexical' else f' ({embedder})'))
+    agents = out['installed_into']
+    detected = [a for a, found in out['agents_detected'].items() if found]
+    lines.append(f"  {ok if agents else warn} agents " + ('  '.join(f"{a}{'' if info.get('hooks') else ' (no hooks)'}" for a, info in agents.items())
+                                                       or 'none connected (`orimem install`)')
+                 + (f"   (found but not connected: {', '.join(sorted(set(detected) - set(agents)))})" if set(detected) - set(agents) else ''))
+    capture = out['capture']
+    formats = out['transcript_formats']
+    drift = [f"{s}: {v['last_status']}" for s, v in formats.items() if v['last_status'] not in ('ok', 'not checked yet')]
+    lines.append(f"  {ok if capture.get('enabled') else warn} capture {'on' if capture.get('enabled') else 'off'}"
+                 f" ({', '.join(capture.get('sources') or [])})" + (f'   formats: {"; ".join(drift)}' if drift else ''))
+    daily = out['daily_summary']
+    lines.append(f"  {ok} daily summary {daily.get('enabled')}" + (f" at {daily.get('time')}" if daily.get('enabled') is True else ''))
+    obs = out['obsidian']
+    lines.append(f"  {ok if obs.get('vault_registered') else warn} obsidian {obs.get('next_step')}")
+    storage = out['storage_mb']
+    total = sum(storage.values())
+    lines.append(f"  {ok if total < 500 else warn} storage {total:.0f} MB in backups/receipts (`orimem prune` cleans up)")
+    missing = [m for m in ('numpy', 'onnxruntime', 'tokenizers', 'watchdog', 'jsonschema', 'yaml', 'zstandard', 'requests')
+               if not out['dependencies'].get(m)]
+    if missing:
+        lines.append(f"  {bad} missing dependencies: {', '.join(missing)}")
+    lines.append('  (`orimem doctor --json` shows every detail)')
+    return '\n'.join(lines)
 
 
 def _backend():
@@ -294,8 +447,7 @@ def cmd_backend(a) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog='orimem', description='OriMem: local Obsidian memory for coding agents',
-                                epilog='Global: orimem --home <dir> <command> overrides ORIMEM_HOME. '
-                                       'Low-level passthrough: orimem journal|write|lifecycle --help')
+                                epilog='Global: orimem --home <dir> <command> overrides ORIMEM_HOME.')
     sub = p.add_subparsers(dest='command', required=True)
 
     s = sub.add_parser('init', help='first-time setup: config, vault, model, agent integration')
@@ -314,7 +466,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help='full-text search only: no embedding model download (switch later with recall.mode)')
     s.add_argument('--no-obsidian-setup', action='store_true', help='do not write .obsidian or the welcome note')
     s.add_argument('-y', '--yes', action='store_true', help='accept defaults for every question')
+    s.add_argument('--json', action='store_true', help='print the full result as JSON')
     s.set_defaults(fn=cmd_init)
+
+    s = sub.add_parser('link', help='create or bind the project page for a folder (what the hook does automatically)')
+    s.add_argument('--cwd', help='folder inside the project (default: current directory)')
+    s.set_defaults(fn=cmd_link)
+
+    s = sub.add_parser('onboard', help='bring conversations from before install into the vault: scan | import | status')
+    s.add_argument('action', choices=['scan', 'import', 'status'], nargs='?', default='status')
+    s.add_argument('--cwd', action='append', help='import: a working folder to bring in (repeatable)')
+    s.add_argument('--days', type=int, help='scan: window in days (default 90, 0 = all); import: only the last N days')
+    s.add_argument('--source', choices=['claude', 'codex', 'dsh'])
+    s.set_defaults(fn=cmd_onboard)
 
     s = sub.add_parser('open', help='open the vault in Obsidian (or say how to install/add it)')
     s.set_defaults(fn=cmd_open)
@@ -356,7 +520,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument('--torch', action='store_true', help='also fetch PyTorch weights')
     s.set_defaults(fn=cmd_model)
 
+    s = sub.add_parser('prune', help='delete old write-back backups and finished batch records (see maintenance.*)')
+    s.add_argument('--dry-run', action='store_true')
+    s.set_defaults(fn=cmd_prune)
+
     s = sub.add_parser('doctor', help='show installation status')
+    s.add_argument('--json', action='store_true', help='print every detail as JSON')
     s.set_defaults(fn=cmd_doctor)
 
     s = sub.add_parser('hook', help='agent hook entry (reads event JSON on stdin)')

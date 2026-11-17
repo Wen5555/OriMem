@@ -1,0 +1,3 @@
+interface:
+  display_name: "OriMem Local Memory"
+  short_description: "Obsidian vault long-term memory: hybrid search, past-conversation evidence, verified write-back and daily/weekly summaries"

@@ -30,7 +30,8 @@ class Watcher:
         self.dirty = threading.Event()
         self.dirty.set()
         self.last_event = 0
-        self.last_import = 0
+        self.last_import = time.monotonic() - 110   # first transcript scan ~10 s after the first index sync
+        self.last_prune = time.monotonic() - 86400 + 600     # first housekeeping 10 minutes after start, then daily
         self.signature = None
         self.process = None
         self.observer = Observer()
@@ -67,6 +68,13 @@ class Watcher:
                     self.backend.lifecycle.health_stage('capture')
             except Exception as error:
                 self.backend.lifecycle.health_stage('capture', error)
+            if at - self.last_prune >= 86400:
+                self.last_prune = at
+                try:
+                    from orimem.maintenance import prune
+                    prune()
+                except Exception:
+                    pass
             # Source projection has its own durable jobs and error state. It
             # must run before, and independently of, embedding or synthesis.
             if self.collect:

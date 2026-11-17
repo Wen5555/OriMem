@@ -158,9 +158,15 @@ flowchart LR
 | `recall.hf_endpoint` | 自动 | 模型下载地址（连不上时自动换成 hf-mirror.com） |
 | `mcp.tools` | `"core"` | `core` 只开放 8 个常用工具 · `all` 同时开放高级工具 |
 | `mcp.extra` | `[]` | 在 `core` 下额外开放的个别高级工具，例如 `["health"]` |
+| `projects.link` | `"auto"` | `auto`：新的项目目录（git 仓库或有构建清单）自动建立项目页 · `offer`：agent 提议一次 · `off` |
+| `projects.import_history` | `true` | 自动建页时一并导入该目录安装前的对话 |
+| `projects.record` | `true` | 已关联项目的会话有实际成果时，agent 自动更新项目页 |
+| `profile.share` | `true` | 会话开始时把库根目录的个人画像同步给各个 agent（`profile.max_chars`，默认 1500 字） |
 | `layout.language` | 系统语言 | 目录预设：`zh` 或 `en` |
 | `layout.<角色>` | 预设值 | 单独改某个目录：`inbox`、`drafts`、`projects`、`courses`、`areas`、`knowledge`、`daily`、`weekly`、`archive`、`evidence`、`legacy`、`workspace`；以及 `course_home`、`weekly_note`、`knowledge_index` |
 | `layout.extra_writable` | `[]` | 允许自动写回的其他目录 |
+| `maintenance.backup_days` | `30` | 写回备份和已完成批次记录的保留天数 |
+| `maintenance.projection_backup_days` | `3` | 自动生成的对话转录笔记，其备份只短期保留 |
 
 ## 参考
 
@@ -169,11 +175,13 @@ flowchart LR
 
 | 命令 | 作用 |
 |---|---|
-| `orimem init [-y]` | 首次配置 |
 | `orimem install / uninstall [--agent claude,codex,dsh] [--dsh-profile 名称]` | 接入或移除 agent |
-| `orimem init [-y] [--lang zh\|en] [--lexical]` | 指定目录语言 / 不下载模型地重新配置 |
-| `orimem doctor` | 检查配置、模型、嵌入后端、库结构、Obsidian、对话格式、依赖和各 agent 的状态 |
+| `orimem init [-y] [--lang zh\|en] [--lexical] [--json]` | 首次配置（重复运行是安全的） |
+| `orimem doctor [--json]` | 一屏体检：库、索引、检索、agent、采集、Obsidian、磁盘占用 |
+| `orimem prune [--dry-run]` | 清理过期的写回备份和已完成的批次记录（每天也会自动运行） |
 | `orimem open` | 在 Obsidian 中打开本库（或提示如何安装、添加） |
+| `orimem onboard scan / import --cwd 目录 [--days N] / status` | 按工作目录把安装前的对话导入库 |
+| `orimem link [--cwd 目录]` | 为某个目录建立或绑定项目页（钩子会自动做） |
 | `orimem capture [--source X] [--session ID] [--backfill]` | 立即采集 |
 | `orimem sync` · `orimem recall "问题" --scope "10 项目"` | 在命令行里索引、检索 |
 | `orimem daily status / run [--dry-run] / apply` | 每日总结 |
@@ -193,18 +201,19 @@ flowchart LR
 | `task_context` | 把当前目录或任务绑定到项目入口 |
 | `recall` | 混合（或全文）检索，返回摘要 |
 | `evidence` | 按结果 ID 取回原文 |
+| `initialize` | 新建或绑定项目／课程入口（先查重；一个项目可绑定多个目录） |
 | `list_sessions` · `get_session_messages` | 浏览已采集的对话 |
 | `prepare_record` · `commit_record` | 可验收的写回 |
-| `config_set` | 记录用户做出的设置决定（如每日总结） |
+
+每日总结还处于“待询问”时，另外开放 `config_set`，方便 agent 记录你的回答。
 
 高级工具（`orimem config set mcp.tools all`，或把个别工具加入 `mcp.extra`）：
 
 | 工具 | 用途 |
 |---|---|
-| `initialize` | 新建带工作区绑定的项目或课程入口 |
 | `lifecycle` | 来源阅读、知识候选、纠正 |
 | `health` · `sync` · `archive_history` | 维护 |
-| `config_get` · `capture_now` | 查看设置、立即采集 |
+| `config_get` · `config_set` · `capture_now` | 设置、立即采集 |
 </details>
 
 <details>
@@ -223,14 +232,24 @@ flowchart LR
 95 AI 工作区/               95 AI Workspace/                  agent 的工作记录
 ```
 
-自动写回只允许进入项目、课程主页、知识、每日/每周日记、AI 草稿、AI 工作区和对话佐证目录（以及 `layout.extra_writable`）。`.obsidian` 只在 `init` 新建一个从未被 Obsidian 打开过的库时写入一次；库外文件不会被触碰。0.1.x 建立的库继续使用 `90 归档/Codex佐证`。
+agent 可以写入项目、课程主页、知识、每日/每周日记、AI 草稿和 AI 工作区（以及 `layout.extra_writable`）。对话佐证目录只由 OriMem 采集写入；个人画像只有在计划带上 `profile_update: true`（你明确要求）时才能修改。`.obsidian` 只在 `init` 新建一个从未被 Obsidian 打开过的库时写入一次；库外文件不会被触碰。0.1.x 建立的库继续使用 `90 归档/Codex佐证`。
 </details>
 
 ## 常见问题
 
+**升级后要做什么？** 运行 `uv tool upgrade orimem-mcp`，再重启各个 agent。新版本第一次运行时，会自动刷新它在已接入 agent 里的 MCP、技能和钩子配置，并把新版本新增的内容补进库里（不会覆盖已有笔记）。结果可以用 `orimem doctor` 查看。
+
+**OriMem 会一直占用更多磁盘吗？** 写回会保留备份和收据，所以每天会按保留策略清理：对话转录笔记的备份保留 3 天，其他备份保留 30 天（`maintenance.*`）。`orimem doctor` 会显示占用，`orimem prune` 可立即清理。
+
+**采集的对话会去掉密钥吗？** 不会。转录按你输入的原样保存，因为改写过的转录就不再是证据了。不要把密钥贴进 agent 对话；敏感目录用 `capture.exclude_cwd` 排除；库里有敏感内容时不要公开同步。工具输出和只出现在工具调用里的密钥不会被采集。
+
 **必须安装 Obsidian 吗？** 不必。agent 直接读写 Markdown 文件夹，Obsidian 只是可选的界面。`orimem doctor` 会显示是否已安装、库是否已添加。
 
 **能不下载模型吗？** 能：`orimem config set recall.mode lexical`（或 `init --lexical`）。这时召回只用 SQLite 全文检索和双链；改回 `hybrid` 并运行 `orimem model download`、`orimem sync` 即可恢复向量检索。
+
+**在一个新项目里开始工作会发生什么？** 你不用做任何事。第一次在项目目录（git 仓库或有构建清单的目录）开会话时，OriMem 会建立项目页、绑定目录（worktree 和其他克隆都能识别）、把这个目录安装前的对话导入为佐证，再由 agent 补上概况。库里已有名字相近的条目时，agent 会问你一次是绑定还是新建。之后在这个目录的每次会话都会带上项目背景，会话有实际成果时 agent 会更新项目页。`projects.link` 可改为 `offer` 或 `off`。要批量导入多个目录的旧对话：`orimem onboard scan` 列出目录，`orimem onboard import --cwd <目录>` 导入选中的目录。
+
+**各个 agent 怎么共享对我的了解？** `init` 会在库根目录放一页个人画像（`个人画像.md`）。你写在里面的内容，会在每次会话开始时同步给所有 agent（Claude Code 通过 MCP 服务说明，Codex 和 dsh 另外通过会话钩子）；空模板不会发送。只有你明确让 agent 记住关于你的事时，它才会修改这页。不要在里面写密码等敏感信息：它会发给各 agent 使用的模型服务商。
 
 **钩子会拖慢 agent 吗？** 采集在后台进行（Claude Code 和 Codex 中 Stop 钩子为 `async`）。会话开始和提交提示词的钩子约需 0.25 秒，用来注入项目背景。
 

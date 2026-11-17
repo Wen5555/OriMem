@@ -8,94 +8,6 @@ import re
 import uuid
 from orimem import journal_state as state
 from orimem import config as _config
-# Machine-specific one-off maintenance authorizations are not shipped; they stay empty.
-ARCHIVE_REFERENCE_NOTES = set()
-LEGACY_REFERENCE_NOTES = set()
-LEGACY_RETIREMENT_NOTES = set()
-LEGACY_NAVIGATION_NOTES = set()
-RETIREMENT_NOTICE = '这些整理稿保留为历史快照，供回查来源编号、读取限制和当时的候选问题；当前进展、决定与知识以项目、日记和知识页为准。原文继续保留，退役不表示旧内容全部错误或已经完成逐会话全文核验。'
-
-def body_after_properties(content):
-    match=re.match(r'\A---\r?\n.*?\r?\n---(?:\r?\n|$)',content,re.S)
-    if not match:raise ValueError('Explicit legacy maintenance requires existing frontmatter')
-    return content[match.end():]
-
-def validate_legacy_retirement(path,content,through):
-    before=path.read_bytes().decode('utf-8-sig');old=properties(before);new=properties(content)
-    added={'retrieval_basis','legacy_retired_at','legacy_retirement_reason'}
-    if set(new)-set(old)-added or set(old)-set(new) or any(new[k]!=v for k,v in old.items()):
-        raise ValueError('Retirement must preserve all existing YAML properties')
-    if new.get('retrieval_basis')!='historical-only' or not isinstance(new.get('legacy_retirement_reason'),str) or not new['legacy_retirement_reason'].strip():
-        raise ValueError('Retirement requires explicit historical-only disposition and reason')
-    if state.dt(str(new.get('legacy_retired_at'))).date()!=state.dt(through).date():
-        raise ValueError('Retirement date must be its actual writer batch date')
-    if body_after_properties(before)!=body_after_properties(content):
-        raise ValueError('Retirement cannot rewrite any legacy body, link or statistic')
-
-def validate_legacy_navigation(path,content):
-    before=path.read_bytes().decode('utf-8-sig')
-    if properties(before)!=properties(content):raise ValueError('Navigation must preserve all metadata')
-    if before==content:return
-    comparable=content
-    if path.name=='归档索引.md':
-        notice=RETIREMENT_NOTICE+'\n\n'
-        if comparable.count(notice)!=1:raise ValueError('Archive navigation needs the exact retained-history notice')
-        comparable=comparable.replace(notice,'',1)
-    pattern=r'\[\[[^\]\n]+\]\]';a=re.split('('+pattern+')',before);b=re.split('('+pattern+')',comparable)
-    if len(a)!=len(b):raise ValueError('Only existing selected navigation links may be changed')
-    old_target='90 归档/整理依据/整理依据索引'
-    for i,(old,new) in enumerate(zip(a,b)):
-        if old==new:continue
-        if i%2==0:raise ValueError('Navigation prose is immutable outside the exact archive notice')
-        target,sep,label=old[2:-2].partition('|')
-        expected='[[90 归档/归档索引#整理依据'+sep+label+']]'
-        if target.removesuffix('.md')!=old_target or new!=expected:
-            raise ValueError('Only the reviewed legacy index to existing archive entry mapping is allowed')
-
-
-def validate_archive_references(path, content, root):
-    """Maintain selected snapshot references without rewriting any historical prose."""
-    if not path.is_file():
-        raise ValueError('Archive reference maintenance requires an existing note.')
-    before = path.read_bytes().decode('utf-8-sig')
-    pattern = r'(?:\[\[[^\]\n]+\]\])+'
-    old_parts, new_parts = re.split('('+pattern+')', before), re.split('('+pattern+')', content)
-    if len(old_parts) != len(new_parts):
-        raise ValueError('Reference-only maintenance cannot add or remove reference positions.')
-    for i, (old, new) in enumerate(zip(old_parts, new_parts)):
-        if old == new:
-            continue
-        if i % 2 == 0 or not re.fullmatch(r'\[\[90 归档/整理依据/[^\]\n#|]+聊天来源索引#S\d{3}(?:\\?\|[^\]\n]+)?\]\]',old):
-            raise ValueError('Archive historical prose and unrelated references are immutable here.')
-        links = re.findall(r'\[\[([^\]\n]+)\]\]',new)
-        if not links or ''.join('[['+x+']]' for x in links) != new:
-            raise ValueError('Invalid replacement reference sequence.')
-        visible = lambda x: x.split('|',1)[1] if '|' in x else x
-        suffix = r'（旧编号(\d+)→当前位置(\d+)；原文支持核对）$'
-        labels = [visible(x) for x in links]
-        if ''.join(re.sub(suffix,'',x) for x in labels) != visible(old[2:-2]):
-            raise ValueError('Reference labels must preserve the old visible wording.')
-        old_events = re.search(r'事件\s*(\d+(?:[、,，]\s*\d+)*)', visible(old[2:-2]))
-        expected_events = [int(x) for x in re.findall(r'\d+',old_events[1])] if old_events else []
-        for position,link in enumerate(links):
-            target = link.split('|',1)[0].rstrip('\\')
-            note, marker, heading = target.partition('#')
-            if not marker or not heading or not _config.under(note, _config.layout_path('evidence')):
-                raise ValueError('Archive replacements require a precise Codex evidence heading.')
-            annotation = re.search(suffix, labels[position])
-            current_event = re.match(r'^(\d+) · ', heading)
-            if annotation:
-                if not current_event or int(annotation[2])!=int(current_event[1]) or int(annotation[1])==int(annotation[2]):
-                    raise ValueError('Relocated citation label must match the actual current heading.')
-                if len(expected_events)!=len(links) or int(annotation[1])!=expected_events[position]:
-                    raise ValueError('Relocated citation label must match the explicit original event.')
-            elif len(expected_events)==len(links) and current_event and expected_events[position]!=int(current_event[1]):
-                raise ValueError('Different numeric locators require an explicit reviewed mapping label.')
-            dest = state.note_path(note if note.endswith('.md') else note+'.md', root)
-            if not dest.is_file() or len(re.findall(r'(?m)^#{1,6} '+re.escape(heading)+r'\s*$',dest.read_text(encoding='utf-8-sig'))) != 1:
-                raise ValueError('Replacement evidence heading is missing or ambiguous.')
-
-
 
 def properties(content):
     """Validate frontmatter with the already installed PyYAML; no installation."""
@@ -187,25 +99,13 @@ def check_note(content, checks, eligible):
     return verified
 
 
-def validate_plan(plan, root, authorized_control_notes=(), authorized_area_notes=(), authorized_archive_reference_notes=(), authorized_legacy_reference_notes=(), authorized_legacy_retirement_notes=(), authorized_navigation_notes=(), authorized_legacy_cleanup_notes=()):
-    EXPLICIT_NOTES = set()
-
-    def validate_cleanup(*_args):
-        raise ValueError("Legacy cleanup maintenance is not available in OriMem")
-    if set(authorized_legacy_cleanup_notes)-EXPLICIT_NOTES:
-        raise ValueError('Only the explicitly authorized old-draft transfer and two reference notes are supported')
-    if set(authorized_control_notes) - {'AGENTS.md'}:
-        raise ValueError('Only the explicitly authorized vault AGENTS control note is supported.')
-    if any(not _config.under(n, _config.layout_path('areas')) for n in authorized_area_notes):
-        raise ValueError('Only explicitly selected research/study area entry maintenance is supported.')
-    if set(authorized_archive_reference_notes) - ARCHIVE_REFERENCE_NOTES:
-        raise ValueError('Only the explicitly selected legacy snapshots support reference maintenance.')
-    if set(authorized_legacy_reference_notes) - LEGACY_REFERENCE_NOTES:
-        raise ValueError('Only the named legacy reference notes support explicit maintenance.')
-    if set(authorized_legacy_retirement_notes)-LEGACY_RETIREMENT_NOTES or set(authorized_navigation_notes)-LEGACY_NAVIGATION_NOTES:
-        raise ValueError('Only the exact reviewed legacy retirement/navigation notes support maintenance.')
+def validate_plan(plan, root, internal=False):
+    """Check a write plan. ``internal`` is only passed by OriMem's own evidence projection/archive code:
+    agents (through prepare_record) can never write the evidence folder. The profile note is writable only
+    when the plan carries ``profile_update: true`` (set when the user explicitly asked)."""
     required = {"batch_id", "through", "events", "changes"}
-    optional = {"scan_kind", "scan_complete", "scan_from", "week", "pending", "resolved_sessions", "period"}
+    optional = {"scan_kind", "scan_complete", "scan_from", "week", "pending", "resolved_sessions", "period",
+                "profile_update"}
     if not isinstance(plan, dict) or not required <= plan.keys() or set(plan) - required - optional:
         raise ValueError("Unexpected or missing plan fields.")
     if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}", plan["batch_id"]):
@@ -238,6 +138,8 @@ def validate_plan(plan, root, authorized_control_notes=(), authorized_area_notes
         state.normalize_project_scope(period.get('project_scope'))
         if not plan.get('scan_from') or state.dt(period['from_time']) != state.dt(plan['scan_from']) or state.dt(period['through']) != bound:
             raise ValueError('Daily period must match the actual scan_from and through bounds.')
+    if type(plan.get("profile_update", False)) is not bool:
+        raise ValueError("profile_update must be a boolean.")
     if type(plan.get("scan_complete", False)) is not bool:
         raise ValueError("scan_complete must be a boolean.")
     if plan.get("scan_kind") == "daily" and plan.get("scan_complete"):
@@ -254,33 +156,21 @@ def validate_plan(plan, root, authorized_control_notes=(), authorized_area_notes
             raise ValueError("Each change requires path, expected_sha256, content, checks.")
         path = state.note_path(change["path"], root)
         parts = path.relative_to(root).parts
-        control = change['path'] in authorized_control_notes and parts == ('AGENTS.md',)
         lay = _config.layout()
         rel = '/'.join(parts)
-        area = change['path'] in authorized_area_notes and _config.under(rel, lay['areas']) and len(parts) == len(lay['areas'].split('/'))+1
-        archive_reference = change['path'] in {*authorized_archive_reference_notes,*authorized_legacy_reference_notes}
-        retirement=change['path'] in authorized_legacy_retirement_notes
-        navigation=change['path'] in authorized_navigation_notes
-        cleanup=change['path'] in authorized_legacy_cleanup_notes
-        maintenance=archive_reference or retirement or navigation or cleanup
-        if not any(_config.under(rel, folder) for folder in _config.writable()) and not control and not area and not maintenance:
+        evidence = any(_config.under(rel, folder) for folder in (lay['evidence'], _config.LEGACY_EVIDENCE))
+        profile = rel == lay['profile'] + '.md'
+        if evidence and not internal:
+            raise ValueError("Conversation evidence is written only by OriMem's capture; agents cannot change it.")
+        if profile and not plan.get('profile_update'):
+            raise ValueError("The profile note changes only when the user explicitly asks (plan field profile_update: true).")
+        if not (evidence or profile or any(_config.under(rel, folder) for folder in _config.writable())):
             raise ValueError("Automatic writes are limited to projects, courses, knowledge, daily/weekly journals, "
-                             "AI drafts, the AI workspace and conversation evidence (see `orimem config get layout`).")
+                             "AI drafts and the AI workspace (see `orimem config get layout`).")
         if _config.under(rel, lay['courses']) and (len(parts) != len(lay['courses'].split('/'))+2 or parts[-1] != lay['course_home']+'.md'):
             raise ValueError('Automatic course writes are limited to the course homepage; original materials are protected.')
-        if cleanup:
-            validate_cleanup(path,change['content'],root)
-        if archive_reference:
-            if change['expected_sha256'] is None:
-                raise ValueError('Archive reference maintenance cannot create a snapshot.')
-            validate_archive_references(path, change['content'], root)
-        if retirement or navigation:
-            if change['expected_sha256'] is None or not path.is_file():raise ValueError('Legacy maintenance cannot create or remove notes')
-            if retirement:validate_legacy_retirement(path,change['content'],plan['through'])
-            if navigation:validate_legacy_navigation(path,change['content'])
         if _config.under(rel, lay['journal']) and not (_config.under(rel, lay['daily']) or _config.under(rel, lay['weekly'])):
-            if not cleanup:
-                raise ValueError("Journals belong in the daily or weekly subfolder.")
+            raise ValueError("Journals belong in the daily or weekly subfolder.")
         if path in paths:
             raise ValueError("Duplicate note path in plan.")
         paths.add(path)
@@ -298,10 +188,10 @@ def validate_plan(plan, root, authorized_control_notes=(), authorized_area_notes
     return verified
 
 
-def apply_plan(plan, state_path=state.DEFAULT, root=state.ROOT, authorized_control_notes=(), authorized_area_notes=(), authorized_archive_reference_notes=(), authorized_legacy_reference_notes=(), authorized_legacy_retirement_notes=(), authorized_navigation_notes=(), authorized_legacy_cleanup_notes=()):
+def apply_plan(plan, state_path=state.DEFAULT, root=state.ROOT, internal=False):
     root = state.plain_path(root)
     state_path = state.plain_path(state_path)
-    checked = validate_plan(plan, root, authorized_control_notes=authorized_control_notes,authorized_area_notes=authorized_area_notes,authorized_archive_reference_notes=authorized_archive_reference_notes,authorized_legacy_reference_notes=authorized_legacy_reference_notes,authorized_legacy_retirement_notes=authorized_legacy_retirement_notes,authorized_navigation_notes=authorized_navigation_notes,authorized_legacy_cleanup_notes=authorized_legacy_cleanup_notes)
+    checked = validate_plan(plan, root, internal=internal)
     from orimem.core.lifecycle import register_write
     register_write(state_path.parent / 'orimem.db', plan)
     ident = plan["batch_id"]

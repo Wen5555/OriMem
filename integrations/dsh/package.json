@@ -1,6 +1,6 @@
 {
   "name": "dsh-orimem",
-  "version": "0.1.3",
+  "version": "1.0.0-rc.1",
   "description": "OriMem for DeepSeek Harness: Obsidian-vault long-term memory over MCP (recall, verified write-back, conversation capture). · OriMem 记忆：用 Obsidian 库做长期记忆（检索、可验收写回、对话采集）。",
   "keywords": ["dsh-plugin", "deepseek", "harness", "mcp", "memory", "obsidian"],
   "license": "MIT",

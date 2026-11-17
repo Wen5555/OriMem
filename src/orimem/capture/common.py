@@ -52,6 +52,16 @@ def epoch(ts: str) -> int:
     return int(datetime.fromisoformat(ts.replace('Z', '+00:00')).timestamp())
 
 
+def _norm_cwd(value: str) -> str:
+    return (value or '').replace('\\', '/').rstrip('/').casefold()
+
+
+def within(cwd: str, folders) -> bool:
+    """cwd equals or lies inside one of ``folders`` (case-insensitive, either slash)."""
+    norm = _norm_cwd(cwd)
+    return bool(norm) and any(norm == f or norm.startswith(f + '/') for f in map(_norm_cwd, folders) if f)
+
+
 def excluded_cwd(cwd: str) -> bool:
     norm = (cwd or '').replace('\\', '/').rstrip('/').casefold()
     for prefix in config.get('capture.exclude_cwd') or []:
@@ -67,6 +77,8 @@ def write_session(db: Path, sid: str, path: Path, session: dict, events: list, s
     db.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(db, timeout=30)) as c, c:
         c.executescript(SCHEMA)
+        if c.execute('PRAGMA user_version').fetchone()[0] == 0:
+            c.execute('PRAGMA user_version=1')      # adapter mirror schema v1
         c.execute('DELETE FROM events WHERE session_id=?', (sid,))
         c.execute('INSERT OR REPLACE INTO source_sessions(session_id,rollout_path,created_at,updated_at,cwd,source,model_provider,'
                   'cli_version,title,first_user_message,thread_source,session_kind,source_line_end,event_records_seen,invalid_records) '

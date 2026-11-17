@@ -21,8 +21,10 @@ def versions():
 
 
 def test_single_version():
+    # npm / plugin / registry use SemVer (1.0.0-rc.1), Python uses PEP 440 (1.0.0rc1): the same version.
+    from packaging.version import Version
     found = versions()
-    assert len(set(found.values())) == 1, found
+    assert len({Version(v) for v in found.values()}) == 1, found
 
 
 def test_registry_identity():

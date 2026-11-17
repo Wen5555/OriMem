@@ -26,6 +26,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,8 +39,11 @@ jobs:
           VERSION="${TAG#v}"
           uv venv && uv pip install -e ".[test]"
           uv run --no-sync pytest -q tests/test_release.py
-          test "$(uv run --no-sync python -c 'import orimem; print(orimem.__version__)')" = "$VERSION"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # SemVer tag (v1.0.0-rc.1) and PEP 440 package version (1.0.0rc1) must name the same version.
+          uv run --no-sync python -c "import sys, orimem; from packaging.version import Version as V; sys.exit(V(orimem.__version__) != V('$VERSION'))"
+          PRE=$(uv run --no-sync python -c "from packaging.version import Version as V; print(str(V('$VERSION').is_prerelease).lower())")
+          echo "version=$(uv run --no-sync python -c 'import orimem; print(orimem.__version__)')" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRE" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - name: Build Python package
         run: uv build -o dist
@@ -83,6 +87,8 @@ jobs:
         run: gh release upload "${{ needs.build.outputs.tag }}" dist/* --clobber --repo "${{ github.repository }}"
 
   mcp-registry:
+    # Release candidates go to PyPI and GitHub only; the registry gets stable versions.
+    if: needs.build.outputs.prerelease != 'true'
     needs: [build, pypi]
     runs-on: ubuntu-latest
     permissions:

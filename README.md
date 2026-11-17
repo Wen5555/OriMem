@@ -156,9 +156,15 @@ Settings live in `~/.orimem/config.toml`. Change them with `orimem config set <k
 | `recall.hf_endpoint` | auto | Model download endpoint (falls back to hf-mirror.com) |
 | `mcp.tools` | `"core"` | `core` publishes 8 everyday tools · `all` adds the advanced ones |
 | `mcp.extra` | `[]` | With `core`: individual advanced tools to publish, e.g. `["health"]` |
+| `projects.link` | `"auto"` | `auto`: a new project folder (git checkout or build manifest) gets its own project page automatically · `offer`: the agent suggests it once · `off` |
+| `projects.import_history` | `true` | Auto-linking also imports that folder's conversations from before the install |
+| `projects.record` | `true` | In a linked project, agents keep the project page up to date when a session delivers something |
+| `profile.share` | `true` | Share the vault-root profile note with every agent at session start (`profile.max_chars`, default 1500) |
 | `layout.language` | system locale | `zh` or `en` folder preset |
 | `layout.<role>` | preset | Override one folder: `inbox`, `drafts`, `projects`, `courses`, `areas`, `knowledge`, `daily`, `weekly`, `archive`, `evidence`, `legacy`, `workspace`; also `course_home`, `weekly_note`, `knowledge_index` |
 | `layout.extra_writable` | `[]` | Further folders automatic write-back may touch |
+| `maintenance.backup_days` | `30` | Keep write-back backups and finished batch records this long |
+| `maintenance.projection_backup_days` | `3` | Backups of auto-generated transcript notes are kept only briefly |
 
 ## Reference
 
@@ -167,11 +173,13 @@ Settings live in `~/.orimem/config.toml`. Change them with `orimem config set <k
 
 | Command | What it does |
 |---|---|
-| `orimem init [-y]` | First-time setup |
 | `orimem install / uninstall [--agent claude,codex,dsh] [--dsh-profile NAME]` | Connect or disconnect agents |
-| `orimem init [-y] [--lang zh\|en] [--lexical]` | (re)run setup with a folder language / without the model |
-| `orimem doctor` | Check config, model, embedder, layout, Obsidian, transcript formats, dependencies and agents |
+| `orimem init [-y] [--lang zh\|en] [--lexical] [--json]` | First-time setup (re-running it is safe) |
+| `orimem doctor [--json]` | One-screen health check: vault, index, search, agents, capture, Obsidian, storage |
+| `orimem prune [--dry-run]` | Delete old write-back backups and finished batch records (also runs daily) |
 | `orimem open` | Open the vault in Obsidian (or say how to install/add it) |
+| `orimem onboard scan / import --cwd DIR [--days N] / status` | Bring conversations from before the install in, by working folder |
+| `orimem link [--cwd DIR]` | Create or bind the project page for a folder (the hook does this automatically) |
 | `orimem capture [--source X] [--session ID] [--backfill]` | Capture now |
 | `orimem sync` · `orimem recall "query" --scope "10 项目"` | Index / search from the shell |
 | `orimem daily status / run [--dry-run] / apply` | Daily summary |
@@ -191,18 +199,19 @@ Published by default (8):
 | `task_context` | Bind the current folder/task to a project entry |
 | `recall` | Hybrid (or lexical) search, snippets |
 | `evidence` | Exact source text for result ids |
+| `initialize` | Create or bind a project/course entry to a folder (checks for duplicates; several folders per project) |
 | `list_sessions` · `get_session_messages` | Browse captured conversations |
 | `prepare_record` · `commit_record` | Verified write-back |
-| `config_set` | Record a setting the user decided (e.g. the daily summary) |
+
+`config_set` is also published while the daily summary is still "ask", so the agent can record the answer.
 
 Advanced (`orimem config set mcp.tools all`, or list some in `mcp.extra`):
 
 | Tool | Purpose |
 |---|---|
-| `initialize` | Create a project/course entry with a workspace binding |
 | `lifecycle` | Source reading, candidates, corrections |
 | `health` · `sync` · `archive_history` | Maintenance |
-| `config_get` · `capture_now` | Read settings, capture now |
+| `config_get` · `config_set` · `capture_now` | Settings, capture now |
 </details>
 
 <details>
@@ -221,14 +230,24 @@ English preset                    Chinese preset
 95 AI Workspace/                  95 AI 工作区/              agent work notes
 ```
 
-Automatic writes are limited to projects, courses (homepage only), knowledge, daily/weekly journals, AI drafts, the AI workspace and the evidence folder (plus `layout.extra_writable`). `.obsidian` is only written once, when `init` creates a vault Obsidian has never opened; files outside the vault are never touched. Vaults set up by 0.1.x keep `90 归档/Codex佐证`.
+Agents may write projects, courses (homepage only), knowledge, daily/weekly journals, AI drafts and the AI workspace (plus `layout.extra_writable`). The evidence folder is written only by OriMem's capture, and the profile note only when a plan carries `profile_update: true` (an explicit request from you). `.obsidian` is only written once, when `init` creates a vault Obsidian has never opened; files outside the vault are never touched. Vaults set up by 0.1.x keep `90 归档/Codex佐证`.
 </details>
 
 ## FAQ
 
+**What happens when I upgrade?** `uv tool upgrade orimem-mcp`, then restart your agents. The first time the new version runs, it refreshes its own MCP/skill/hook entries in the agents it is already installed into and adds anything new to the vault (it never overwrites a note). `orimem doctor` shows the result.
+
+**Does OriMem keep growing on disk?** Write-back keeps backups and receipts, so a retention policy runs daily: transcript-note backups are kept 3 days, other backups 30 days (`maintenance.*`). `orimem doctor` shows the storage used and `orimem prune` cleans up immediately.
+
+**Are secrets removed from captured conversations?** No. Transcripts are stored as you typed them, because a rewritten transcript is no longer evidence. Don't paste secrets into agent chats, exclude sensitive folders with `capture.exclude_cwd`, and keep the vault out of public sync if it holds sensitive work. Tool output and secrets that only appear in tool calls are not captured.
+
 **Do I need Obsidian?** No. Agents read and write the Markdown folder directly; Obsidian is the optional UI. `orimem doctor` shows whether it is installed and whether the vault is added.
 
 **Can I run without the embedding model?** Yes: `orimem config set recall.mode lexical` (or `init --lexical`). Recall then uses SQLite full-text search and links only; set `hybrid` and run `orimem model download` + `orimem sync` to get vectors back.
+
+**What happens when I start working in a new project?** Nothing for you to do. The first session in a project folder (a git checkout or a folder with a build manifest) creates its project page, binds the folder (worktrees and extra clones are recognised), imports that folder's conversations from before the install as evidence, and the agent fills in an overview. If a similarly named entry already exists, the agent asks once whether to bind or create. From then on every session there gets the project context, and agents update the page when a session delivers something. Set `projects.link` to `offer` or `off` to change this. For older history across many folders: `orimem onboard scan` lists them, `orimem onboard import --cwd <folder>` brings the chosen ones in.
+
+**How do agents share what they know about me?** `init` puts a profile note at the vault root (`About Me.md` / `个人画像.md`). Whatever you write there reaches every agent at session start (Claude Code via the MCP server instructions, Codex and dsh also via the session hook); an empty template is never shared. Agents change it only when you explicitly ask them to remember something about you. Don't put secrets in it: it is sent to whichever model provider each agent uses.
 
 **Do the hooks slow my agent down?** Capture runs in the background (`async` Stop hook in Claude Code and Codex). The session-start and prompt hooks take about a quarter of a second because they inject project context.
 

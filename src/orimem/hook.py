@@ -39,14 +39,14 @@ def normalized_session(agent: str, session: str) -> str:
     return session if session.startswith(prefix) else prefix + session
 
 
-def _notify_service(args: dict) -> bool:
+def _notify_service(args: dict, tool: str = 'capture_now') -> bool:
     """POST capture_now(background) to the local OriMem service; stdlib only, ~ms when it runs."""
     import urllib.request
     try:
         state = json.loads((config.home() / 'service-state.json').read_text(encoding='utf-8'))
         request = urllib.request.Request(
             f'http://127.0.0.1:{int(state["port"])}/rpc',
-            data=json.dumps(dict(name='capture_now', arguments=args)).encode('utf-8'),
+            data=json.dumps(dict(name=tool, arguments=args)).encode('utf-8'),
             headers={'X-OriMem-Key': state['key'], 'Content-Type': 'application/json'}, method='POST')
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # never via a proxy
         with opener.open(request, timeout=3) as response:
@@ -66,6 +66,10 @@ def _spawn_capture(agent: str, session: str | None, transcript: str | None) -> N
         args += ['--path', transcript]
     if session:
         args += ['--session', session]
+    _detached(args)
+
+
+def _detached(args: list) -> None:
     flags = 0
     if os.name == 'nt':
         flags = getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
@@ -91,6 +95,18 @@ def request_capture(agent: str, session: str | None, transcript: str | None) -> 
     return 'spawned'
 
 
+def request_link(cwd: str) -> str:
+    """Ask the service to create/bind the folder's entry in the background; spawn `orimem link` if it is not running."""
+    if _notify_service(dict(cwd=cwd, background=True), tool='link_workspace'):
+        return 'service'
+    exe = sys.executable
+    if os.name == 'nt':
+        windowless = os.path.join(os.path.dirname(exe), 'pythonw.exe')
+        exe = windowless if os.path.exists(windowless) else exe
+    _detached([exe, '-X', 'utf8', '-m', 'orimem', '--home', str(config.home()), 'link', '--cwd', cwd])
+    return 'spawned'
+
+
 def handle(event: dict, agent: str) -> dict:
     name = event.get('hook_event_name')
     output: dict = {}
@@ -109,6 +125,16 @@ def handle(event: dict, agent: str) -> dict:
             output = hook_entry.handle(shared, scope=config.project_scopes()) or {}
         except Exception:
             output = {}
+        link = output.pop('_orimem_link', None)
+        if link:
+            request_link(link['cwd'])
+    if name == 'SessionStart' and agent in ('codex', 'dsh'):
+        # Claude Code already shows the MCP server instructions, which carry the profile.
+        from orimem import profile
+        block = profile.context_block()
+        if block:
+            spec = output.setdefault('hookSpecificOutput', dict(hookEventName=name))
+            spec['additionalContext'] = (spec.get('additionalContext', '') + '\n\n' + block).strip()
     if name == 'SessionStart' and config.get('daily_summary.enabled') == 'ask':
         spec = output.setdefault('hookSpecificOutput', dict(hookEventName=name))
         ask = ASK_DAILY if config.layout()['language'] == 'zh' else ASK_DAILY_EN

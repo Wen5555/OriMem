@@ -24,10 +24,20 @@ def dt(value):
     return parsed
 
 
+def _trusted_roots():
+    # The vault and ORIMEM_HOME themselves (and anything above them) may be reached through links:
+    # a symlinked home folder or a vault on a junction is the user's choice. Links are rejected only
+    # inside them, where a link could redirect a write outside the folder.
+    return {Path(os.path.abspath(_config.vault())), Path(os.path.abspath(_config.home()))}
+
+
 def plain_path(path):
-    """Check lexical ancestors BEFORE resolve, including Windows junctions."""
+    """Check lexical ancestors BEFORE resolve, including Windows junctions, up to the vault/home root."""
     path = Path(os.path.abspath(path))
+    roots = _trusted_roots()
     for item in [path, *path.parents]:
+        if item in roots:
+            break
         if item.exists() or item.is_symlink():
             info = item.lstat()
             if item.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:

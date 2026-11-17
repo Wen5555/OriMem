@@ -25,3 +25,4 @@
 | evidence | `{evidence}` | 自动采集的对话转录（只读佐证） |
 | archive | `{archive}` | 历史快照；`{legacy}` 不进入检索 |
 | workspace | `{workspace}` | AI 的工作记录与验收材料 |
+| profile | `{profile}.md` | 个人画像：每次会话开始时同步给所有 agent；只在用户明确要求时修改，不写敏感信息 |

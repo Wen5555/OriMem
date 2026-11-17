@@ -44,7 +44,7 @@ If `orimem` is not found afterwards in your current shell, call it by full path:
 Fill in the user's answers:
 
 ```bash
-orimem init --yes --vault "<vault folder>" --lang <zh|en> --capture <on|off> --daily ask --skip-model
+orimem init --yes --json --vault "<vault folder>" --lang <zh|en> --capture <on|off> --daily ask --skip-model
 ```
 
 - Add `--lexical` if the user chose lexical mode.
@@ -78,9 +78,21 @@ Check these fields:
 
 If any command printed `{"error": ...}`, show that message to the user. Do not work around it by editing files.
 
-## 6. Tell the user
+## 6. Offer to bring in older conversations (optional)
+
+Conversations from before the install are not captured automatically. Ask the user if they want to import some of them. If they do:
+
+1. Run `orimem onboard scan`. It is read-only and covers the last 90 days; add `--days 0` for everything.
+2. Show a short list of the working folders it found: sessions, dates, sample prompts.
+3. Let the user pick folders, then run `orimem onboard import --cwd "<folder>"` once per chosen folder.
+
+Turning those transcripts into project pages is done later, in a normal session, by following the OriMem skill (`references/onboarding.md`). Do not do it during installation.
+
+## 7. Tell the user
 
 - **Restart** Claude Code / Codex / DeepSeek Harness so they load OriMem. That includes this session, if it is one of them.
+- **Profile.** The vault root now has a profile note (`个人画像.md` or `About Me.md`). Suggest that the user fill it in: what they write there reaches every agent at the start of each session. No secrets.
+- **Projects** need no setup: the first session in a project folder creates its project page automatically.
 - **Obsidian** is optional. Relay `obsidian.next_step` from step 3: either how to install Obsidian, or which folder to open as a vault. Later, `orimem open` opens the vault.
 - **Next steps:**
   - ask an agent something like *"What did we decide about X last week?"* or *"Record that X is done"*;

@@ -67,14 +67,22 @@ def ensure():
                 return state
             except (requests.RequestException, ValueError):
                 pass
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        child = subprocess.Popen(
-            [sys.executable, "-X", "utf8", "-m", "orimem", "service"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=flags,
-        )
+        # Shared by every agent: detach it from the agent that happened to start it.
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        child = None
+        for extra in ((getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0),) if os.name == "nt" else ()) + (0,):
+            try:
+                child = subprocess.Popen(
+                    [sys.executable, "-X", "utf8", "-m", "orimem", "service"],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=flags | extra,
+                    start_new_session=(os.name != "nt"),
+                )
+                break
+            except OSError:
+                continue
         deadline = time.monotonic() + 25
         while time.monotonic() < deadline:
             state = read_state()
@@ -112,6 +120,13 @@ def stop_service():
 
 
 def run_service():
+    from orimem import config as _config
+    _config.ensure_home()
+    try:
+        from orimem.upgrade import run_if_needed
+        run_if_needed()
+    except Exception:
+        pass               # an upgrade step must never keep the memory service from starting
     backend = Backend()
     auth = secrets.token_urlsafe(32)
     last_request = [time.monotonic()]
@@ -155,9 +170,8 @@ def run_service():
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
     state = dict(port=server.server_address[1], key=auth, pid=os.getpid(), service="orion-local-v1")
-    temporary = ENDPOINT.with_suffix(".tmp")
-    temporary.write_bytes(json.dumps(state).encode("utf-8"))
-    os.replace(temporary, ENDPOINT)
+    from orimem import config as _config
+    _config.write_private(ENDPOINT, json.dumps(state).encode("utf-8"))
     watcher = Watcher(backend, collect=True).start()
 
     def idle_monitor():

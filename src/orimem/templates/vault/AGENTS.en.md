@@ -25,3 +25,4 @@ Folder names are configurable under `[layout]` in `~/.orimem/config.toml` (`orim
 | evidence | `{evidence}` | Captured conversation transcripts (read-only evidence) |
 | archive | `{archive}` | Historical snapshots; `{legacy}` is excluded from search |
 | workspace | `{workspace}` | The AI's working records and acceptance material |
+| profile | `{profile}.md` | The user's profile: shared with every agent at session start; change only when the user explicitly asks, no secrets |

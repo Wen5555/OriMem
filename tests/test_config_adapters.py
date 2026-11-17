@@ -190,6 +190,9 @@ def test_mcp_server_starts_without_embedding_model(env):
     from conftest import SRC
     from orimem import config
     config.set_value('mcp.extra', ['config_get'])
+    note = env['vault'] / '10 项目' / 'Demo.md'
+    note.parent.mkdir(parents=True)
+    note.write_text('# Demo\n\nSomething to embed.\n', encoding='utf-8')
     requests = [
         dict(jsonrpc='2.0', id=1, method='initialize', params={}),
         dict(jsonrpc='2.0', id=2, method='tools/list', params={}),
@@ -203,7 +206,8 @@ def test_mcp_server_starts_without_embedding_model(env):
     replies = {r['id']: r for r in map(json.loads, result.stdout.splitlines())}
     assert replies[1]['result']['serverInfo']['name'] == 'orimem', result.stderr
     from orimem.core.mcp_server import CORE_TOOLS
-    assert {t['name'] for t in replies[2]['result']['tools']} == set(CORE_TOOLS) | {'config_get'}
+    # config_set is published while the daily summary is still "ask"
+    assert {t['name'] for t in replies[2]['result']['tools']} == set(CORE_TOOLS) | {'config_get', 'config_set'}
     assert 'capture_now' in replies[1]['result']['instructions']   # hidden advanced tools are named
     assert replies[3]['result']['content'][0]['text'] == 'true'
     assert 'model download' in replies[4]['error']['message']

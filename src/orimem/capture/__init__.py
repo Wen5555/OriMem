@@ -25,7 +25,12 @@ def module(name: str):
 def _since() -> float | None:
     value = config.get('capture.since')
     if not value:
-        return None
+        # Never backfill implicitly: older history is imported only on request (`orimem onboard`).
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+        if config.configured():
+            config.set_value('capture.since', now.isoformat(timespec='seconds'))
+        return now.timestamp()
     return datetime.fromisoformat(str(value).replace('Z', '+00:00')).timestamp()
 
 
@@ -58,7 +63,8 @@ def resolve(source: str, session: str | None = None, path: str | None = None) ->
     return str(candidate) if candidate else None
 
 
-def collect(sources=None, backfill: bool = False, project: bool = True, only_path: str | None = None, backend=None) -> dict:
+def collect(sources=None, backfill: bool = False, project: bool = True, only_path: str | None = None, backend=None,
+            only_cwd=None, since: float | None = None) -> dict:
     """Incrementally mirror changed transcripts, stage them, then project into the vault.
 
     Sessions whose files were last modified before ``capture.since`` are not
@@ -67,7 +73,9 @@ def collect(sources=None, backfill: bool = False, project: bool = True, only_pat
     if not config.get('capture.enabled', True):
         return dict(enabled=False, reason='capture.enabled is false')
     wanted = [s for s in (sources or config.get('capture.sources') or SOURCES) if s in SOURCES]
-    since = None if backfill else _since()
+    if since is None:
+        # An explicitly named transcript (hook, capture_now) is captured whatever its age.
+        since = None if (backfill or only_path) else _since()
     out: dict = dict(enabled=True, sources={})
     with common.file_lock(common.sources_dir() / 'collect.lock') as acquired:
         if not acquired:
@@ -88,15 +96,19 @@ def collect(sources=None, backfill: bool = False, project: bool = True, only_pat
                 key = str(path)
                 if since is not None and mtime / 1e9 < since:
                     continue
-                if seen.get(key) == mtime:
+                if seen.get(key) == mtime and only_cwd is None:
                     continue
                 try:
-                    result = mod.capture_file(path)
+                    result = mod.capture_file(path, only_cwd=only_cwd) if only_cwd is not None else mod.capture_file(path)
                 except Exception as error:      # fail closed for this file; next run retries
                     report['errors'] += 1
                     common.log(dict(op='capture', source=name, path=key, error=type(error).__name__ + ': ' + str(error)[:300]))
                     continue
+                if result.get('skipped'):
+                    continue                # outside an onboarding selection: not processed, not marked seen
                 seen[key] = mtime
+                if only_cwd is not None and result.get('captured'):
+                    report.setdefault('sessions', []).append(result['session_id'])
                 formats.record(name, key, result.get('format'))
                 if (result.get('format') or {}).get('warnings'):
                     report['format_warnings'] = report.get('format_warnings', 0) + 1
