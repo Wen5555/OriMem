@@ -50,11 +50,15 @@ def test_worktree_resolves_to_main_checkout(env, tmp_path):
     assert workspace_variants(str(main)) == [str(main)]
 
 
-def test_unlinked_folder_is_offered_once(env, tmp_path):
+def test_unlinked_folder_is_offered_once(env, tmp_path, monkeypatch):
     from orimem import config, hook_entry
     config.set_value('recall.mode', 'lexical')
     _backend().sync()                                   # creates the database the hook reads
-    event = dict(hook_event_name='SessionStart', session_id='s1', cwd='D:/code/newproj')   # temp folders are never offered
+    import tempfile
+    monkeypatch.setattr(tempfile, 'tempdir', str(env['home'] / 'no-temp'))   # pytest dirs live under temp
+    plain = env['home'] / 'notes' / 'newproj'          # a folder without any project marker
+    plain.mkdir(parents=True)
+    event = dict(hook_event_name='SessionStart', session_id='s1', cwd=str(plain))
     first = hook_entry.handle(event, db=config.db(), vault=config.vault(), scope=config.project_scopes())
     assert 'initialize' in first['hookSpecificOutput']['additionalContext']
     assert hook_entry.handle(dict(event, session_id='s2'), db=config.db(), vault=config.vault(),
@@ -135,7 +139,7 @@ def test_similar_entry_asks_instead_of_creating(env, monkeypatch):
 def test_profile_is_shared_only_when_filled(env, capsys):
     from orimem import cli, config, profile
     from orimem.core.mcp_server import server_instructions
-    cli.main(['init', '--yes', '--vault', str(env['vault']), '--agents', 'none', '--skip-model'])
+    cli.main(['init', '--yes', '--lang', 'zh', '--vault', str(env['vault']), '--agents', 'none', '--skip-model'])
     capsys.readouterr()
     config.reload()
     note = env['vault'] / '个人画像.md'
