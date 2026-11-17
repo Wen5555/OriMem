@@ -4,14 +4,16 @@ OriMem one-line installer for Windows.
     irm https://raw.githubusercontent.com/Wen5555/OriMem/main/scripts/install.ps1 | iex
 
 Environment overrides:
-    ORIMEM_SOURCE      package source (default: orimem-mcp from PyPI, falling back to the GitHub main archive)
+    ORIMEM_SOURCE      package source (default: the newest orimem-mcp on PyPI, release candidates included,
+                       falling back to the GitHub main archive)
     ORIMEM_INIT_ARGS   arguments for `orimem init` (default: interactive); "skip" skips init
     ORIMEM_MIRROR      "cn" forces China mirrors, "none" disables auto-detection
     ORIMEM_NO_MODIFY_PATH=1  do not add uv's tool directory to the user PATH
 #>
 $ErrorActionPreference = 'Stop'
 $Fallback = 'https://github.com/Wen5555/OriMem/archive/refs/heads/main.zip'
-$Source = if ($env:ORIMEM_SOURCE) { $env:ORIMEM_SOURCE } else { 'orimem-mcp' }
+# A pre-release in the requirement lets uv pick OriMem release candidates; dependencies stay stable.
+$Source = if ($env:ORIMEM_SOURCE) { $env:ORIMEM_SOURCE } else { 'orimem-mcp>=1.0.0rc2' }
 
 function Step($text) { Write-Host "==> $text" -ForegroundColor Cyan }
 
@@ -73,4 +75,4 @@ if ($env:ORIMEM_INIT_ARGS -eq 'skip') {
 Write-Host ''
 Write-Host 'OriMem is installed. Restart Claude Code / Codex / DeepSeek Harness to load it.' -ForegroundColor Green
 Write-Host '  orimem doctor        check the setup'
-Write-Host '  uv tool upgrade orimem-mcp   update later'
+Write-Host '  uv tool upgrade orimem-mcp   update later (re-running this installer works too)'

@@ -97,12 +97,14 @@ One-time steps per agent:
 <summary>Other ways to install</summary>
 
 ```bash
-uv tool install orimem-mcp
+uv tool install "orimem-mcp>=1.0.0rc2"
 ```
 
 ```bash
-pipx install orimem-mcp
+pipx install "orimem-mcp>=1.0.0rc2"
 ```
+
+The `>=1.0.0rc2` part makes uv/pip take the newest OriMem, release candidates included (other packages stay on stable releases); the installers above do the same.
 
 The PyPI distribution is `orimem-mcp`; the command it installs is `orimem`. To run the MCP server without installing it first, use `uvx --from orimem-mcp orimem mcp`.
 
@@ -254,7 +256,7 @@ Agents may write projects, courses (homepage only), knowledge, daily/weekly jour
 
 ## FAQ
 
-**What happens when I upgrade?** `uv tool upgrade orimem-mcp`, then restart your agents. The first time the new version runs, it refreshes its own MCP/skill/hook entries in the agents it is already installed into and adds anything new to the vault (it never overwrites a note). `orimem doctor` shows the result.
+**What happens when I upgrade?** `uv tool upgrade orimem-mcp` (or re-run the installer), then restart your agents. Coming from 0.1.x: `uv tool install --force "orimem-mcp>=1.0.0rc2"` once, since that install was pinned to stable releases. The first time the new version runs, it refreshes its own MCP/skill/hook entries in the agents it is already installed into and adds anything new to the vault (it never overwrites a note). `orimem doctor` shows the result.
 
 **Does OriMem keep growing on disk?** Write-back keeps backups and receipts, so a retention policy runs daily: transcript-note backups are kept 3 days, other backups 30 days (`maintenance.*`). `orimem doctor` shows the storage used and `orimem prune` cleans up immediately.
 

@@ -99,12 +99,14 @@ OriMem **每台电脑只装一次**。Claude Code、Codex、DeepSeek Harness 共
 <summary>其他安装方式</summary>
 
 ```bash
-uv tool install orimem-mcp
+uv tool install "orimem-mcp>=1.0.0rc2"
 ```
 
 ```bash
-pipx install orimem-mcp
+pipx install "orimem-mcp>=1.0.0rc2"
 ```
+
+`>=1.0.0rc2` 让 uv/pip 安装最新的 OriMem（包括候选版），其他依赖仍用正式版；上面的一键安装脚本也是这样做的。
 
 PyPI 上的包名是 `orimem-mcp`，装好后的命令是 `orimem`。不想先安装也能直接启动 MCP 服务：`uvx --from orimem-mcp orimem mcp`。
 
@@ -256,7 +258,7 @@ agent 可以写入项目、课程主页、知识、每日/每周日记、AI 草�
 
 ## 常见问题
 
-**升级后要做什么？** 运行 `uv tool upgrade orimem-mcp`，再重启各个 agent。新版本第一次运行时，会自动刷新它在已接入 agent 里的 MCP、技能和钩子配置，并把新版本新增的内容补进库里（不会覆盖已有笔记）。结果可以用 `orimem doctor` 查看。
+**升级后要做什么？** 运行 `uv tool upgrade orimem-mcp`（或重新运行安装脚本），再重启各个 agent。从 0.1.x 升级时，先运行一次 `uv tool install --force "orimem-mcp>=1.0.0rc2"`，因为旧安装只跟随正式版。新版本第一次运行时，会自动刷新它在已接入 agent 里的 MCP、技能和钩子配置，并把新版本新增的内容补进库里（不会覆盖已有笔记）。结果可以用 `orimem doctor` 查看。
 
 **OriMem 会一直占用更多磁盘吗？** 写回会保留备份和收据，所以每天会按保留策略清理：对话转录笔记的备份保留 3 天，其他备份保留 30 天（`maintenance.*`）。`orimem doctor` 会显示占用，`orimem prune` 可立即清理。
 

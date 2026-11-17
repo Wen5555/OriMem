@@ -4,14 +4,16 @@
 #   curl -LsSf https://raw.githubusercontent.com/Wen5555/OriMem/main/scripts/install.sh | sh
 #
 # Environment overrides:
-#   ORIMEM_SOURCE      package source (default: orimem-mcp from PyPI, falling back to the GitHub main archive)
+#   ORIMEM_SOURCE      package source (default: the newest orimem-mcp on PyPI, release candidates included,
+#                      falling back to the GitHub main archive)
 #   ORIMEM_INIT_ARGS   arguments for `orimem init` (default: interactive); "skip" skips init
 #   ORIMEM_MIRROR      "cn" forces China mirrors, "none" disables auto-detection
 #   ORIMEM_NO_MODIFY_PATH=1  do not add uv's tool directory to shell profiles
 set -eu
 
 FALLBACK=https://github.com/Wen5555/OriMem/archive/refs/heads/main.zip
-SOURCE="${ORIMEM_SOURCE:-orimem-mcp}"
+# A pre-release in the requirement lets uv pick OriMem release candidates; dependencies stay stable.
+SOURCE="${ORIMEM_SOURCE:-orimem-mcp>=1.0.0rc2}"
 step() { printf '\033[36m==> %s\033[0m\n' "$1"; }
 reachable() { curl -fsS -o /dev/null -m 5 -I "$1" 2>/dev/null; }
 
@@ -70,4 +72,4 @@ fi
 
 printf '\n\033[32mOriMem is installed. Restart Claude Code / Codex / DeepSeek Harness to load it.\033[0m\n'
 echo "  orimem doctor             check the setup"
-echo "  uv tool upgrade orimem-mcp    update later"
+echo "  uv tool upgrade orimem-mcp    update later (re-running this installer works too)"
