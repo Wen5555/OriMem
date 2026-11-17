@@ -19,6 +19,8 @@ recall project context across sessions, write confirmed results back with receip
 
 </div>
 
+<!-- mcp-name: io.github.Wen5555/orimem -->
+
 ---
 
 ## Why OriMem
@@ -57,12 +59,14 @@ Then just talk to your agent:
 <summary>Other ways to install</summary>
 
 ```bash
-uv tool install git+https://github.com/Wen5555/OriMem.git
+uv tool install orimem-mcp
 ```
 
 ```bash
-pipx install git+https://github.com/Wen5555/OriMem.git
+pipx install orimem-mcp
 ```
+
+The PyPI distribution is `orimem-mcp`; the command it installs is `orimem`. To run the MCP server without installing it first, use `uvx --from orimem-mcp orimem mcp`.
 
 ```bash
 orimem init
@@ -191,11 +195,10 @@ Writes are limited to `layout.folders`. `.obsidian` and files outside the vault 
 
 **How do I turn capture off for a project?** `orimem config set capture.exclude_cwd '["D:/work/secret"]'`. To turn it off everywhere: `orimem config set capture.enabled false`.
 
-**How do I remove everything?** `orimem uninstall`, then `uv tool uninstall orimem`. Your vault and `~/.orimem` stay until you delete them.
+**How do I remove everything?** `orimem uninstall`, then `uv tool uninstall orimem-mcp`. Your vault and `~/.orimem` stay until you delete them.
 
 ## Roadmap
 
-- [ ] PyPI release (`uvx orimem`)
 - [ ] Configurable / English vault layout
 - [ ] More agents (Cursor, Gemini CLI, OpenCode)
 - [ ] Optional quantized ONNX model for low-memory machines

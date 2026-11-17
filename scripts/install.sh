@@ -4,13 +4,14 @@
 #   curl -LsSf https://raw.githubusercontent.com/Wen5555/OriMem/main/scripts/install.sh | sh
 #
 # Environment overrides:
-#   ORIMEM_SOURCE      package source (default: GitHub main archive; a local path also works)
+#   ORIMEM_SOURCE      package source (default: orimem-mcp from PyPI, falling back to the GitHub main archive)
 #   ORIMEM_INIT_ARGS   arguments for `orimem init` (default: interactive); "skip" skips init
 #   ORIMEM_MIRROR      "cn" forces China mirrors, "none" disables auto-detection
 #   ORIMEM_NO_MODIFY_PATH=1  do not add uv's tool directory to shell profiles
 set -eu
 
-SOURCE="${ORIMEM_SOURCE:-https://github.com/Wen5555/OriMem/archive/refs/heads/main.zip}"
+FALLBACK=https://github.com/Wen5555/OriMem/archive/refs/heads/main.zip
+SOURCE="${ORIMEM_SOURCE:-orimem-mcp}"
 step() { printf '\033[36m==> %s\033[0m\n' "$1"; }
 reachable() { curl -fsS -o /dev/null -m 5 -I "$1" 2>/dev/null; }
 
@@ -44,7 +45,11 @@ fi
 
 # 3. OriMem itself.
 step "Installing OriMem from $SOURCE"
-uv tool install --force --python 3.12 "$SOURCE"
+if ! uv tool install --force --python 3.12 "$SOURCE"; then
+  [ -z "${ORIMEM_SOURCE:-}" ] || exit 1
+  step "PyPI install failed; installing from $FALLBACK"
+  uv tool install --force --python 3.12 "$FALLBACK"
+fi
 [ -n "${ORIMEM_NO_MODIFY_PATH:-}" ] || uv tool update-shell >/dev/null 2>&1 || true
 PATH="$(uv tool dir --bin):$PATH"; export PATH
 
@@ -65,4 +70,4 @@ fi
 
 printf '\n\033[32mOriMem is installed. Restart Claude Code / Codex / DeepSeek Harness to load it.\033[0m\n'
 echo "  orimem doctor             check the setup"
-echo "  uv tool upgrade orimem    update later"
+echo "  uv tool upgrade orimem-mcp    update later"

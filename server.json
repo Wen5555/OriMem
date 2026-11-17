@@ -1,0 +1,24 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Wen5555/orimem",
+  "title": "OriMem",
+  "description": "Long-term memory for coding agents in your own Obsidian vault: recall, write-back, capture.",
+  "version": "0.1.1",
+  "repository": {
+    "url": "https://github.com/Wen5555/OriMem",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/Wen5555/OriMem#readme",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "orimem-mcp",
+      "version": "0.1.1",
+      "runtimeHint": "uvx",
+      "packageArguments": [
+        { "type": "positional", "value": "mcp" }
+      ],
+      "transport": { "type": "stdio" }
+    }
+  ]
+}

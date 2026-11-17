@@ -61,12 +61,14 @@ curl -LsSf https://raw.githubusercontent.com/Wen5555/OriMem/main/scripts/install
 <summary>其他安装方式</summary>
 
 ```bash
-uv tool install git+https://github.com/Wen5555/OriMem.git
+uv tool install orimem-mcp
 ```
 
 ```bash
-pipx install git+https://github.com/Wen5555/OriMem.git
+pipx install orimem-mcp
 ```
+
+PyPI 上的包名是 `orimem-mcp`，装好后的命令是 `orimem`。不想先安装也能直接启动 MCP 服务：`uvx --from orimem-mcp orimem mcp`。
 
 ```bash
 orimem init
@@ -193,11 +195,10 @@ flowchart LR
 
 **怎么让某个项目不被采集？** 运行 `orimem config set capture.exclude_cwd '["D:/work/secret"]'`。要全部关闭，运行 `orimem config set capture.enabled false`。
 
-**怎么彻底卸载？** 先运行 `orimem uninstall`，再运行 `uv tool uninstall orimem`。你的库和 `~/.orimem` 会保留，需要时请手动删除。
+**怎么彻底卸载？** 先运行 `orimem uninstall`，再运行 `uv tool uninstall orimem-mcp`。你的库和 `~/.orimem` 会保留，需要时请手动删除。
 
 ## 路线图
 
-- [ ] 发布到 PyPI（`uvx orimem`）
 - [ ] 可配置的库结构，并提供英文版目录
 - [ ] 支持更多 agent（Cursor、Gemini CLI、OpenCode）
 - [ ] 为小内存机器提供可选的量化 ONNX 模型

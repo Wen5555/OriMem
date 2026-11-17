@@ -1,0 +1,108 @@
+name: Release
+
+# Publishing a GitHub release (tag vX.Y.Z) builds the package, publishes it to PyPI through
+# Trusted Publishing (no token stored anywhere), attaches the build and the dsh bundle to the
+# release, and publishes server.json to the official MCP Registry through GitHub OIDC.
+#
+# One-time setup on pypi.org (Account settings -> Publishing -> Add a pending publisher):
+#   PyPI project name: orimem-mcp   Owner: Wen5555   Repository: OriMem
+#   Workflow name: release.yml      Environment: pypi
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish (e.g. v0.1.1)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+      - uses: astral-sh/setup-uv@v6
+      - name: Check that every version string matches the tag
+        id: version
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          VERSION="${TAG#v}"
+          uv venv && uv pip install -e ".[test]"
+          uv run --no-sync pytest -q tests/test_release.py
+          test "$(uv run --no-sync python -c 'import orimem; print(orimem.__version__)')" = "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Build Python package
+        run: uv build -o dist
+      - name: Pack dsh bundle
+        run: cd integrations/dsh && npm pack --pack-destination ../../dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/orimem-mcp/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Keep only Python distributions
+        run: rm -f dist/*.tgz
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  release-assets:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Attach build to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ needs.build.outputs.tag }}" dist/* --clobber --repo "${{ github.repository }}"
+
+  mcp-registry:
+    needs: [build, pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.tag }}
+      - name: Wait until PyPI serves the new version
+        run: |
+          for i in $(seq 1 30); do
+            curl -fsS "https://pypi.org/pypi/orimem-mcp/${{ needs.build.outputs.version }}/json" >/dev/null && exit 0
+            sleep 10
+          done
+          echo "orimem-mcp ${{ needs.build.outputs.version }} not visible on PyPI" >&2; exit 1
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+      - name: Publish server.json
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish

@@ -4,13 +4,14 @@ OriMem one-line installer for Windows.
     irm https://raw.githubusercontent.com/Wen5555/OriMem/main/scripts/install.ps1 | iex
 
 Environment overrides:
-    ORIMEM_SOURCE      package source (default: GitHub main archive; a local path also works)
+    ORIMEM_SOURCE      package source (default: orimem-mcp from PyPI, falling back to the GitHub main archive)
     ORIMEM_INIT_ARGS   arguments for `orimem init` (default: interactive); "skip" skips init
     ORIMEM_MIRROR      "cn" forces China mirrors, "none" disables auto-detection
     ORIMEM_NO_MODIFY_PATH=1  do not add uv's tool directory to the user PATH
 #>
 $ErrorActionPreference = 'Stop'
-$Source = if ($env:ORIMEM_SOURCE) { $env:ORIMEM_SOURCE } else { 'https://github.com/Wen5555/OriMem/archive/refs/heads/main.zip' }
+$Fallback = 'https://github.com/Wen5555/OriMem/archive/refs/heads/main.zip'
+$Source = if ($env:ORIMEM_SOURCE) { $env:ORIMEM_SOURCE } else { 'orimem-mcp' }
 
 function Step($text) { Write-Host "==> $text" -ForegroundColor Cyan }
 
@@ -51,6 +52,10 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 # 3. OriMem itself.
 Step "Installing OriMem from $Source"
 uv tool install --force --python 3.12 $Source
+if ($LASTEXITCODE -ne 0 -and -not $env:ORIMEM_SOURCE) {
+    Step "PyPI install failed; installing from $Fallback"
+    uv tool install --force --python 3.12 $Fallback
+}
 if ($LASTEXITCODE -ne 0) { throw 'uv tool install failed' }
 if (-not $env:ORIMEM_NO_MODIFY_PATH) { uv tool update-shell | Out-Null }
 $toolBin = (uv tool dir --bin).Trim()
@@ -68,4 +73,4 @@ if ($env:ORIMEM_INIT_ARGS -eq 'skip') {
 Write-Host ''
 Write-Host 'OriMem is installed. Restart Claude Code / Codex / DeepSeek Harness to load it.' -ForegroundColor Green
 Write-Host '  orimem doctor        check the setup'
-Write-Host '  uv tool upgrade orimem   update later'
+Write-Host '  uv tool upgrade orimem-mcp   update later'
