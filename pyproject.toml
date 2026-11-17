@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orimem"
+version = "0.1.0"
+description = "Local Obsidian-vault memory for coding agents (Claude Code, Codex, DeepSeek Harness) over MCP: hybrid recall, verified write-back, conversation capture and daily summaries."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Orion" }]
+keywords = ["mcp", "obsidian", "memory", "claude-code", "codex", "agent"]
+dependencies = [
+    "numpy>=1.24",
+    "jsonschema>=4",
+    "pyyaml>=6",
+    "watchdog>=3",
+    "requests>=2.28",
+    "zstandard>=0.21",
+    "torch>=2.1",
+    "transformers>=4.40",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+orimem = "orimem.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Wen5555/OriMem"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+orimem = ["skill/**/*", "templates/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
