@@ -2,6 +2,25 @@
 
 You are an AI coding agent (Claude Code, Codex, DeepSeek Harness, Cline, …) asked to install OriMem for the user. OriMem gives agents a long-term memory in a local Obsidian vault through MCP. Follow these steps in order. Talk to the user in their language. Do not edit agent config files by hand: `orimem` does that itself and keeps backups. Never use `sudo`/administrator rights.
 
+## 0. Is OriMem already installed?
+
+OriMem is installed once per computer and shared by every agent: one vault, one model, one set of settings. Run:
+
+```bash
+orimem doctor --json
+```
+
+(If `orimem` is not on PATH, try `~/.local/bin/orimem` or `%USERPROFILE%\.local\bin\orimem.exe`.)
+
+- **It runs and `configured` is `true`:** OriMem was already set up, for example from another agent. Do **not** run the installer, `init` or the model download again, and do not ask the questions below. Just connect yourself and any other agents that are missing:
+
+  ```bash
+  orimem install --agent <claude|codex|dsh>
+  ```
+
+  Then continue at step 5 (verify) and step 7. Agents installed later are also connected automatically the next time any agent uses OriMem (`agents.auto_connect`).
+- **The command is not found, or `configured` is `false`:** this is a new install; continue with step 1.
+
 ## 1. Ask the user once
 
 Ask all of these in a single message and offer the defaults, so the user can just say "defaults":
@@ -90,6 +109,7 @@ Turning those transcripts into project pages is done later, in a normal session,
 
 ## 7. Tell the user
 
+- **Codex** runs new hooks only after the user approves them once: on the next `codex` start, accept "Hooks need review" (or open `/hooks` and press `t`). Tell the user this if Codex is connected.
 - **Restart** Claude Code / Codex / DeepSeek Harness so they load OriMem. That includes this session, if it is one of them.
 - **Profile.** The vault root now has a profile note (`个人画像.md` or `About Me.md`). Suggest that the user fill it in: what they write there reaches every agent at the start of each session. No secrets.
 - **Projects** need no setup: the first session in a project folder creates its project page automatically.

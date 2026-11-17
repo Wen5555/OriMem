@@ -1,6 +1,6 @@
 {
   "name": "orimem",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "description": "Long-term memory in your own Obsidian vault: hybrid recall, verified write-back and conversation capture over MCP. Requires the orimem CLI (see README).",
   "author": {
     "name": "Wen5555"

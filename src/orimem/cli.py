@@ -351,7 +351,12 @@ def cmd_doctor(a) -> None:
                daily_summary=daily.status())
     from orimem import maintenance, upgrade
     import orimem
+    try:
+        auto = json.loads((config.home() / 'agents-auto.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        auto = None
     out.update(version=orimem.__version__, installed_into=adapters.installed(), index=_index_stats(),
+               agents_auto=auto, agents_skip=config.get('agents.skip') or [],
                storage_mb=maintenance.usage(), configured=config.configured(), upgraded_to=upgrade.recorded())
     if a.json:
         _print(out)
@@ -388,10 +393,18 @@ def _doctor_summary(out: dict) -> str:
     search_ok = out['recall_mode'] == 'lexical' or embedder in ('onnx', 'torch')
     lines.append(f"  {ok if search_ok else bad} search {out['recall_mode']}" + ('' if out['recall_mode'] == 'lexical' else f' ({embedder})'))
     agents = out['installed_into']
+    for name, info in agents.items():
+        if name == 'codex' and info.get('hooks'):
+            info['note'] = '' if info.get('hook_trust') == 'trusted' else ' (hooks need approval in Codex: /hooks)'
+        if name == 'dsh' and info.get('hooks'):
+            missing = [p for p, s in (info.get('hook_bridge') or {}).items() if s == 'missing']
+            info['note'] = f" (hook plugin missing in {', '.join(missing)}: `orimem install --agent dsh`)" if missing else ''
     detected = [a for a, found in out['agents_detected'].items() if found]
-    lines.append(f"  {ok if agents else warn} agents " + ('  '.join(f"{a}{'' if info.get('hooks') else ' (no hooks)'}" for a, info in agents.items())
+    lines.append(f"  {ok if agents and not any(i.get('note') for i in agents.values()) else warn} agents "
+                 + ('  '.join(f"{a}{'' if info.get('hooks') else ' (no hooks)'}{info.get('note') or ''}" for a, info in agents.items())
                                                        or 'none connected (`orimem install`)')
-                 + (f"   (found but not connected: {', '.join(sorted(set(detected) - set(agents)))})" if set(detected) - set(agents) else ''))
+                 + (f"   (found but not connected: {', '.join(sorted(set(detected) - set(agents)))})" if set(detected) - set(agents) else '')
+                 + (f"   (removed on purpose: {', '.join(out['agents_skip'])})" if out.get('agents_skip') else ''))
     capture = out['capture']
     formats = out['transcript_formats']
     drift = [f"{s}: {v['last_status']}" for s, v in formats.items() if v['last_status'] not in ('ok', 'not checked yet')]

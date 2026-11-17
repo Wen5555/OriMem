@@ -3,6 +3,27 @@
 All notable changes. Versions follow [Semantic Versioning](https://semver.org/); the Python package uses
 the equivalent PEP 440 form (`1.0.0rc1` = `1.0.0-rc.1`).
 
+## 1.0.0-rc.2
+
+Tested end to end with real Claude Code 2.1.326, Codex 0.169.0 and DeepSeek Harness 0.2.2-rc.1 sessions
+(DeepSeek models) on Debian 13.
+
+### New
+- One install, every agent: agents installed after OriMem are connected automatically the next time any
+  agent uses OriMem (`agents.auto_connect`); agents removed with `orimem uninstall --agent X` are remembered
+  in `agents.skip` and never reconnected automatically. The agent install guide checks for an existing setup
+  first and then only connects the current agent. README: "Using several agents".
+- `orimem doctor` shows agents found but not connected, removed agents, missing dsh hook plugins and Codex
+  hooks awaiting approval.
+
+### Fixed
+- Installing with `--prerelease allow` pulled the tokenizers 1.0 prerelease, whose API change broke indexing;
+  tokenizers is now limited to `<1`.
+- The npm build of DeepSeek Harness has no hook bridge, so OriMem's hooks never loaded there.
+  `orimem install` now adds `@deepseek-ai/dsh-hooks-claude-code` and `@deepseek-ai/dsh-hook-protocol`
+  (same version as dsh, through `dsh plugin`, which needs pnpm) to profiles that lack them.
+- Codex 0.169 runs hooks only after the user approves them; install output, `doctor` and the docs now say so.
+
 ## 1.0.0-rc.1
 
 First release candidate for 1.0. From 1.0 on, config keys, MCP tool names and schemas, CLI commands and the

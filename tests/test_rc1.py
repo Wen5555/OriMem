@@ -160,3 +160,56 @@ def test_init_survives_eof_on_a_fake_terminal(env, monkeypatch):
     monkeypatch.setattr('builtins.input', lambda *_: (_ for _ in ()).throw(EOFError()))
     cli.ASSUME_DEFAULTS = False
     assert cli._ask('question', 'default') == 'default'
+
+
+def test_agent_installed_later_is_connected_once(env, monkeypatch):
+    from orimem import adapters, config, upgrade
+    monkeypatch.setattr(adapters, 'detect', lambda: dict(claude=True, codex=False, dsh=False))
+    adapters.install(['claude'])
+    (env['home'] / '.codex').mkdir(exist_ok=True)
+    monkeypatch.setattr(adapters, 'detect', lambda: dict(claude=True, codex=True, dsh=False))
+    result = upgrade.connect_new_agents()                 # Codex appeared after OriMem was set up
+    assert set(result) >= {'codex'} and 'claude' not in result
+    assert 'codex' in adapters.installed()
+    assert upgrade.connect_new_agents() is None           # nothing new
+    adapters.uninstall(['codex'])                         # removed on purpose
+    assert config.get('agents.skip') == ['codex']
+    assert upgrade.connect_new_agents() is None and 'codex' not in adapters.installed()
+    adapters.install(['codex'])                           # explicit install lifts the skip
+    assert config.get('agents.skip') == []
+
+
+def test_codex_hook_trust_detection(env):
+    import tomllib
+    from orimem import adapters
+    adapters.install(['codex'])
+    assert adapters.codex_hook_trust() == 'needs approval'
+    hooks_path = env['home'] / '.codex' / 'hooks.json'
+    data = json.loads(hooks_path.read_text(encoding='utf-8'))
+    lines = []
+    for event, groups in data['hooks'].items():
+        label = __import__('re').sub(r'(?<!^)(?=[A-Z])', '_', event).lower()
+        for gi, _ in enumerate(groups):
+            lines.append(f'[hooks.state."file:{hooks_path}:{label}:{gi}:0"]\ntrusted_hash = "sha256:abc"\n')
+    cfg = env['home'] / '.codex' / 'config.toml'
+    cfg.write_text(cfg.read_text(encoding='utf-8') + chr(10) + chr(10).join(l.replace(chr(92), chr(92) * 2) for l in lines), encoding='utf-8')
+    tomllib.loads(cfg.read_text(encoding='utf-8'))
+    assert adapters.codex_hook_trust() == 'trusted'
+
+
+def test_dsh_hook_bridge_states(env, monkeypatch, tmp_path):
+    from orimem import adapters
+    profile = tmp_path / 'profiles' / 'headless'
+    profile.mkdir(parents=True)
+    monkeypatch.setattr(adapters, '_dsh_cli', lambda: None)
+    assert adapters.dsh_hook_bridge(profile) == 'unknown'
+    npm = tmp_path / 'npm' / 'lib' / 'node_modules' / '@deepseek-ai' / 'dsh'
+    (npm / 'lib').mkdir(parents=True)
+    cli = npm / 'lib' / 'bin.js'
+    cli.write_text('', encoding='utf-8')
+    monkeypatch.setattr(adapters, '_dsh_cli', lambda: str(cli))
+    assert adapters.dsh_hook_bridge(profile) == 'missing'
+    monkeypatch.setattr(adapters.shutil, 'which', lambda name: None)
+    assert adapters.ensure_dsh_hook_bridge(profile)['hint'].startswith('dsh installs plugins with pnpm')
+    (profile / 'node_modules' / '@deepseek-ai' / 'dsh-hooks-claude-code').mkdir(parents=True)
+    assert adapters.dsh_hook_bridge(profile) == 'profile'

@@ -284,7 +284,42 @@ def install_codex(backup: Backup, hooks: bool) -> dict:
     if hooks:
         _edit_json(p['hooks'], lambda d: merge_hooks(d, 'codex', windows_key=True), backup)
         out['hooks'] = str(p['hooks'])
+        if codex_hook_trust() != 'trusted':
+            out['action_needed'] = CODEX_TRUST_HINT
     return out
+
+
+CODEX_TRUST_HINT = ('Codex runs new or changed hooks only after you approve them: start `codex`, accept '
+                    '"Hooks need review" (or open /hooks and press t). Until then OriMem still captures '
+                    'every 2 minutes, but project context is not injected.')
+
+
+def codex_hook_trust() -> str:
+    """'trusted' when config.toml holds an approval for OriMem's hooks.json entries, else 'needs approval'.
+
+    Codex stores approvals as hooks.state."<source>:<event>:<group>:<handler>".trusted_hash; the hash
+    itself is Codex's to compute, so a stale approval (hooks changed since) still shows as trusted here.
+    """
+    import tomllib
+    p = codex_paths()
+    try:
+        state = (tomllib.loads(p['config'].read_text(encoding='utf-8')).get('hooks') or {}).get('state') or {}
+    except (OSError, ValueError):
+        return 'needs approval'
+    try:
+        data = json.loads(p['hooks'].read_text(encoding='utf-8-sig'))
+    except (OSError, ValueError):
+        return 'needs approval'
+    ours = set()
+    for event, groups in (data.get('hooks') or {}).items():
+        label = re.sub(r'(?<!^)(?=[A-Z])', '_', event).lower()
+        for gi, group in enumerate(groups):
+            for hi, handler in enumerate(group.get('hooks', [])):
+                if _is_ours(handler):
+                    ours.add(f':{label}:{gi}:{hi}')
+    trusted = [k for k, v in state.items() if isinstance(v, dict) and v.get('trusted_hash')
+               and 'hooks.json' in k and any(k.endswith(suffix) for suffix in ours)]
+    return 'trusted' if ours and len(trusted) >= len(ours) else 'needs approval'
 
 
 def uninstall_codex(backup: Backup) -> dict:
@@ -358,6 +393,64 @@ def dsh_profile_has_bundle(patch: Path) -> bool:
     return DSH_BUNDLE in bundles or DSH_BUNDLE in (manifest.get('dependencies') or {})
 
 
+# The DeepSeek Harness desktop app ships its hook bridge; the npm CLI (@deepseek-ai/dsh) does not,
+# so a profile there needs these two plugins before OriMem's hook entry can load.
+DSH_HOOK_PACKAGES = ('@deepseek-ai/dsh-hooks-claude-code', '@deepseek-ai/dsh-hook-protocol')
+
+
+def _dsh_cli() -> str | None:
+    return shutil.which('dsh')
+
+
+def dsh_hook_bridge(profile_dir: Path) -> str:
+    """'profile' (installed into the profile), 'bundled' (shipped with this dsh), 'missing', or 'unknown'."""
+    if (profile_dir / 'node_modules' / '@deepseek-ai' / 'dsh-hooks-claude-code').is_dir():
+        return 'profile'
+    cli = _dsh_cli()
+    if not cli:
+        return 'unknown'                          # desktop app only (bundled) or dsh not on PATH
+    real = Path(os.path.realpath(cli))
+    if 'deepseek harness' in str(real).lower():   # desktop runtime CLI
+        return 'bundled'
+    roots = [real.parent.parent / 'node_modules', real.parent / 'node_modules',
+             real.parent / 'node_modules' / '@deepseek-ai' / 'dsh' / 'node_modules',
+             real.parent.parent / 'lib' / 'node_modules' / '@deepseek-ai' / 'dsh' / 'node_modules']
+    if any((r / '@deepseek-ai' / 'dsh-hooks-claude-code').is_dir() for r in roots):
+        return 'bundled'
+    return 'missing'
+
+
+def _dsh_version(cli: str) -> str | None:
+    try:
+        out = subprocess.run([cli, '--version'], capture_output=True, text=True, timeout=60).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.splitlines()[0].strip() if out else None
+
+
+def ensure_dsh_hook_bridge(profile_dir: Path) -> dict:
+    """Install the hook bridge (same version as dsh) into an npm-CLI profile that lacks it."""
+    state = dsh_hook_bridge(profile_dir)
+    if state != 'missing':
+        return dict(hook_bridge=state)
+    cli = _dsh_cli()
+    version = _dsh_version(cli) if cli else None
+    if not shutil.which('pnpm'):
+        return dict(hook_bridge='missing', hint='dsh installs plugins with pnpm: `npm install -g pnpm`, then '
+                                                '`orimem install --agent dsh` again')
+    packages = [f'{p}@{version}' if version else p for p in DSH_HOOK_PACKAGES]
+    try:
+        r = subprocess.run([cli, 'plugin', '--profile', profile_dir.name, 'add', *packages],
+                           capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=600)
+    except (OSError, subprocess.SubprocessError) as error:
+        return dict(hook_bridge='missing', error=str(error)[:200])
+    after = dsh_hook_bridge(profile_dir)
+    out = dict(hook_bridge=after, installed=packages if after == 'profile' else [])
+    if after != 'profile':
+        out['error'] = (r.stderr or r.stdout)[-300:]
+    return out
+
+
 def install_dsh(backup: Backup, hooks: bool, profiles=None) -> dict:
     """dsh runs hook commands through its session shell (and sandbox). The OriMem hook therefore
     never writes itself: it asks the running OriMem service to capture, and the service's
@@ -392,8 +485,11 @@ def install_dsh(backup: Backup, hooks: bool, profiles=None) -> dict:
             raise RuntimeError(f'Refusing to write {patch}: result would not parse ({error})')
         _write_text(patch, new)
         written.append(str(patch))
-    return dict(mcp_and_hooks=written, via_bundle=via_bundle, skill=install_skill(p['skills']),
-                hooks_file=str(hooks_file) if hooks_file else None)
+    out = dict(mcp_and_hooks=written, via_bundle=via_bundle, skill=install_skill(p['skills']),
+               hooks_file=str(hooks_file) if hooks_file else None)
+    if hooks:
+        out['hook_bridge'] = {patch.parent.name: ensure_dsh_hook_bridge(patch.parent) for patch in p['patches']}
+    return out
 
 
 def uninstall_dsh(backup: Backup, profiles=None) -> dict:
@@ -457,6 +553,8 @@ def installed() -> dict:
         codex_text = ''
     if BEGIN in codex_text:
         out['codex'] = dict(hooks=has_hooks(x['hooks']))
+        if out['codex']['hooks']:
+            out['codex']['hook_trust'] = codex_hook_trust()
     d = dsh_paths()
     profiles = []
     for patch in d['patches']:
@@ -467,12 +565,32 @@ def installed() -> dict:
             continue
     if profiles:
         out['dsh'] = dict(hooks=d['hooks'].exists(), profiles=profiles)
+        if out['dsh']['hooks']:
+            out['dsh']['hook_bridge'] = {name: dsh_hook_bridge(d['home'] / 'profiles' / name) for name in profiles}
+    return out
+
+
+def _remember_skip(add=(), remove=()) -> None:
+    if not config.configured():
+        return
+    skip = [a for a in (config.get('agents.skip') or []) if a not in set(remove)]
+    skip += [a for a in add if a not in skip]
+    if skip != list(config.get('agents.skip') or []):
+        config.set_value('agents.skip', skip)
+
+
+def connected() -> set:
+    """Agents that already have OriMem (including the Claude Code plugin)."""
+    out = set(installed())
+    if claude_plugin_installed():
+        out.add('claude')
     return out
 
 
 def install(agents, hooks: bool = True, dsh_profiles=None) -> dict:
     backup = Backup()
     out = {}
+    _remember_skip(remove=list(agents))
     for agent in agents:
         try:
             extra = dict(profiles=dsh_profiles) if agent == 'dsh' else {}
@@ -486,6 +604,8 @@ def install(agents, hooks: bool = True, dsh_profiles=None) -> dict:
 def uninstall(agents, dsh_profiles=None) -> dict:
     backup = Backup()
     out = {}
+    if not dsh_profiles:
+        _remember_skip(add=list(agents))      # removed on purpose: auto-connect leaves it alone
     for agent in agents:
         try:
             extra = dict(profiles=dsh_profiles) if agent == 'dsh' else {}

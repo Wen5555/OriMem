@@ -40,7 +40,7 @@
 请按照 https://raw.githubusercontent.com/Wen5555/OriMem/main/llms-install.md 帮我安装并配置 OriMem
 ```
 
-agent 会先问你四个问题（库放在哪里、目录语言、是否采集对话、检索模式），之后全程无需再确认：安装、接入检测到的所有 agent、用 `orimem doctor` 自检，最后告诉你需要重启什么。它遵循的步骤见 [llms-install.md](llms-install.md)。
+agent 会先问你四个问题（库放在哪里、目录语言、是否采集对话、检索模式），之后全程无需再确认：安装、接入检测到的所有 agent、用 `orimem doctor` 自检，最后告诉你需要重启什么。如果 OriMem 已经配置过（比如是在另一个 agent 里装的），它会跳过这些，只接入它自己。它遵循的步骤见 [llms-install.md](llms-install.md)。
 
 **也可以自己运行安装脚本：**
 
@@ -76,6 +76,24 @@ curl -LsSf https://raw.githubusercontent.com/Wen5555/OriMem/main/scripts/install
 
 > “上周我们对导出功能是怎么定的？”
 > “记录一下：WebGPU 渲染已经完成，下一步是图层拖拽排序。”
+
+### 多个 agent 一起用
+
+OriMem **每台电脑只装一次**。Claude Code、Codex、DeepSeek Harness 共用同一个库、嵌入模型、索引和设置，所以接入新的 agent 不会重新下载，也不会再问一遍问题。
+
+| 情况 | 怎么做 |
+|---|---|
+| 配置 OriMem 时这些 agent 已经装好了 | 不用做什么：`init` 会接入检测到的所有 agent。 |
+| 之后又装了别的 agent（比如在 Codex 里装了 OriMem，下周才装 dsh） | 不用做什么：任意 agent 下次用到 OriMem 时，新 agent 会在后台自动接入（`agents.auto_connect`），重启它一次即可。 |
+| 想立刻接入 | 运行 `orimem install --agent dsh`（或 `claude`、`codex`），或者把上面那句提示词发给这个 agent：它会发现 OriMem 已经配置好，只接入它自己。 |
+| 主动移除过某个 agent | `orimem uninstall --agent codex` 会被记住，之后不会被自动接回；`orimem install --agent codex` 可以重新接入。 |
+| 查看接入情况 | `orimem doctor` 会列出已接入的 agent、已发现但未接入的 agent，以及某个 agent 还需要做的步骤。 |
+
+各 agent 的一次性步骤：
+
+- **Codex** 只运行用户批准过的钩子：下次启动 `codex` 时确认 “Hooks need review”（或打开 `/hooks` 按 `t`）。批准之前 MCP 工具照常可用，对话也照常每 2 分钟采集一次，但不会注入项目背景。升级后如果 Codex 提示钩子有变化，再批准一次。
+- **DeepSeek Harness** 如果是用 npm 安装的命令行版（`@deepseek-ai/dsh`），它不带钩子插件；`orimem install` 会通过 `dsh plugin` 给每个 profile 补装，这一步需要 `pnpm`（`npm install -g pnpm`）。桌面版已经自带。
+- **Claude Code** 也可以改用下面的插件方式安装，这时 OriMem 不会改动 Claude 自己的设置。
 
 <details>
 <summary>其他安装方式</summary>
@@ -158,6 +176,7 @@ flowchart LR
 | `recall.hf_endpoint` | 自动 | 模型下载地址（连不上时自动换成 hf-mirror.com） |
 | `mcp.tools` | `"core"` | `core` 只开放 8 个常用工具 · `all` 同时开放高级工具 |
 | `mcp.extra` | `[]` | 在 `core` 下额外开放的个别高级工具，例如 `["health"]` |
+| `agents.auto_connect` | `true` | 自动接入在 OriMem 之后才安装的 agent（共用库、模型和设置） |
 | `projects.link` | `"auto"` | `auto`：新的项目目录（git 仓库或有构建清单）自动建立项目页 · `offer`：agent 提议一次 · `off` |
 | `projects.import_history` | `true` | 自动建页时一并导入该目录安装前的对话 |
 | `projects.record` | `true` | 已关联项目的会话有实际成果时，agent 自动更新项目页 |
@@ -250,6 +269,8 @@ agent 可以写入项目、课程主页、知识、每日/每周日记、AI 草�
 **在一个新项目里开始工作会发生什么？** 你不用做任何事。第一次在项目目录（git 仓库或有构建清单的目录）开会话时，OriMem 会建立项目页、绑定目录（worktree 和其他克隆都能识别）、把这个目录安装前的对话导入为佐证，再由 agent 补上概况。库里已有名字相近的条目时，agent 会问你一次是绑定还是新建。之后在这个目录的每次会话都会带上项目背景，会话有实际成果时 agent 会更新项目页。`projects.link` 可改为 `offer` 或 `off`。要批量导入多个目录的旧对话：`orimem onboard scan` 列出目录，`orimem onboard import --cwd <目录>` 导入选中的目录。
 
 **各个 agent 怎么共享对我的了解？** `init` 会在库根目录放一页个人画像（`个人画像.md`）。你写在里面的内容，会在每次会话开始时同步给所有 agent（Claude Code 通过 MCP 服务说明，Codex 和 dsh 另外通过会话钩子）；空模板不会发送。只有你明确让 agent 记住关于你的事时，它才会修改这页。不要在里面写密码等敏感信息：它会发给各 agent 使用的模型服务商。
+
+**我在 Codex 里装了 OriMem，dsh（或 Claude Code）还要再装吗？** 不用。OriMem 每台电脑只装一次，所有 agent 共用同一个库、模型和设置。之后才装的 agent，会在任意 agent 下次使用 OriMem 时自动接入（`agents.auto_connect`；用 `orimem uninstall --agent X` 移除过的不会被重新接入），也可以立刻运行 `orimem install --agent dsh`。Codex 会要求你批准一次 OriMem 的钩子（`/hooks`）。如果 dsh 是用 npm 安装的命令行版，OriMem 会补装 dsh 需要的钩子插件（需要 `pnpm`）。
 
 **钩子会拖慢 agent 吗？** 采集在后台进行（Claude Code 和 Codex 中 Stop 钩子为 `async`）。会话开始和提交提示词的钩子约需 0.25 秒，用来注入项目背景。
 

@@ -49,6 +49,10 @@ DEFAULTS: dict = {
         "share": True,                 # give every agent the vault-root profile note at session start
         "max_chars": 1500,
     },
+    "agents": {
+        "auto_connect": True,          # connect agents installed after OriMem (same vault, model and settings)
+        "skip": [],                    # agents removed with `orimem uninstall --agent`; never reconnected
+    },
     "maintenance": {
         "backup_days": 30,             # keep write-back backups / finished batch records this long
         "projection_backup_days": 3,   # backups of auto-generated transcript notes are kept only briefly

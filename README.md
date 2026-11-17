@@ -42,7 +42,7 @@ Coding agents forget everything when a session ends, and each agent keeps its hi
 Install and set up OriMem for me by following https://raw.githubusercontent.com/Wen5555/OriMem/main/llms-install.md
 ```
 
-The agent asks you four questions (vault folder, folder language, capture, search mode), installs without further prompts, connects every agent it finds, verifies with `orimem doctor` and tells you what to restart. The steps it follows are in [llms-install.md](llms-install.md).
+The agent asks you four questions (vault folder, folder language, capture, search mode), installs without further prompts, connects every agent it finds, verifies with `orimem doctor` and tells you what to restart. If OriMem is already set up (for example from another agent), it skips all of that and only connects itself. The steps it follows are in [llms-install.md](llms-install.md).
 
 **Or run the installer yourself:**
 
@@ -74,6 +74,24 @@ Then just talk to your agent:
 
 > *"What did we decide about the export feature last week?"*
 > *"Record that the WebGPU renderer is done and the next step is drag-to-reorder layers."*
+
+### Using several agents
+
+OriMem is installed **once per computer**. Claude Code, Codex and DeepSeek Harness all share the same vault, embedding model, index and settings, so adding an agent never re-downloads or re-asks anything.
+
+| Situation | What to do |
+|---|---|
+| The agents are already installed when you set OriMem up | Nothing: `init` connects every agent it finds. |
+| You install another agent later (e.g. OriMem set up from Codex, dsh installed next week) | Nothing: the next time any agent uses OriMem, the new agent is connected in the background (`agents.auto_connect`). Restart it once. |
+| You want it connected right now | `orimem install --agent dsh` (or `claude`, `codex`), or paste the one-line prompt above into that agent: it sees OriMem is already set up and only connects itself. |
+| You removed an agent on purpose | `orimem uninstall --agent codex`; it is remembered and never reconnected automatically. `orimem install --agent codex` brings it back. |
+| Check what is connected | `orimem doctor` lists connected agents, agents found but not connected, and any step an agent still needs. |
+
+One-time steps per agent:
+
+- **Codex** runs new hooks only after you approve them: on the next `codex` start accept "Hooks need review" (or open `/hooks` and press `t`). Until then the MCP tools work and conversations are still captured every 2 minutes, but project context is not injected. Approve again if Codex says the hooks changed after an upgrade.
+- **DeepSeek Harness** installed from npm (`@deepseek-ai/dsh`) does not ship the hook bridge; `orimem install` adds it to each profile through `dsh plugin`, which needs `pnpm` (`npm install -g pnpm`). The desktop app already includes it.
+- **Claude Code** can use the plugin instead of `orimem install` (below); OriMem then leaves Claude's own settings alone.
 
 <details>
 <summary>Other ways to install</summary>
@@ -156,6 +174,7 @@ Settings live in `~/.orimem/config.toml`. Change them with `orimem config set <k
 | `recall.hf_endpoint` | auto | Model download endpoint (falls back to hf-mirror.com) |
 | `mcp.tools` | `"core"` | `core` publishes 8 everyday tools · `all` adds the advanced ones |
 | `mcp.extra` | `[]` | With `core`: individual advanced tools to publish, e.g. `["health"]` |
+| `agents.auto_connect` | `true` | Connect agents installed after OriMem (they share the vault, model and settings) |
 | `projects.link` | `"auto"` | `auto`: a new project folder (git checkout or build manifest) gets its own project page automatically · `offer`: the agent suggests it once · `off` |
 | `projects.import_history` | `true` | Auto-linking also imports that folder's conversations from before the install |
 | `projects.record` | `true` | In a linked project, agents keep the project page up to date when a session delivers something |
@@ -248,6 +267,8 @@ Agents may write projects, courses (homepage only), knowledge, daily/weekly jour
 **What happens when I start working in a new project?** Nothing for you to do. The first session in a project folder (a git checkout or a folder with a build manifest) creates its project page, binds the folder (worktrees and extra clones are recognised), imports that folder's conversations from before the install as evidence, and the agent fills in an overview. If a similarly named entry already exists, the agent asks once whether to bind or create. From then on every session there gets the project context, and agents update the page when a session delivers something. Set `projects.link` to `offer` or `off` to change this. For older history across many folders: `orimem onboard scan` lists them, `orimem onboard import --cwd <folder>` brings the chosen ones in.
 
 **How do agents share what they know about me?** `init` puts a profile note at the vault root (`About Me.md` / `个人画像.md`). Whatever you write there reaches every agent at session start (Claude Code via the MCP server instructions, Codex and dsh also via the session hook); an empty template is never shared. Agents change it only when you explicitly ask them to remember something about you. Don't put secrets in it: it is sent to whichever model provider each agent uses.
+
+**I set OriMem up from Codex. Does dsh (or Claude Code) get it too?** Yes. OriMem is installed once per computer and every agent shares the same vault, model and settings. Agents installed later are connected automatically the next time any agent uses OriMem (`agents.auto_connect`; agents you removed with `orimem uninstall --agent X` stay removed), or right away with `orimem install --agent dsh`. Codex asks you once to approve OriMem's hooks (`/hooks`). With the npm build of dsh, OriMem adds the hook plugin dsh needs (this uses `pnpm`).
 
 **Do the hooks slow my agent down?** Capture runs in the background (`async` Stop hook in Claude Code and Codex). The session-start and prompt hooks take about a quarter of a second because they inject project context.
 

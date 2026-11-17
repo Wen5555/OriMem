@@ -48,3 +48,24 @@ def run_if_needed(force: bool = False) -> dict | None:
                                          dsh_profiles=info.get('profiles')).get(agent)
     mark()
     return result
+
+
+def connect_new_agents() -> dict | None:
+    """Connect agents installed after OriMem (e.g. OriMem set up from Codex, dsh installed later).
+
+    They share the one OriMem home - vault, model, index, settings - so nothing is downloaded again.
+    Agents the user removed (`agents.skip`) and setups with `agents.auto_connect = false` are left alone.
+    """
+    if not config.configured() or not config.get('agents.auto_connect', True):
+        return None
+    from orimem import adapters
+    found = [a for a, present in adapters.detect().items() if present]
+    new = [a for a in found if a not in adapters.connected() and a not in (config.get('agents.skip') or [])]
+    if not new:
+        return None
+    result = adapters.install(new)
+    record = dict(at=datetime.now(timezone.utc).isoformat(timespec='seconds'),
+                  connected={a: ('error' not in (result.get(a) or {})) for a in new})
+    config.ensure_home()
+    (config.home() / 'agents-auto.json').write_text(json.dumps(record, ensure_ascii=False), encoding='utf-8')
+    return result

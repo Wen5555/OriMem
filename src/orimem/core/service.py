@@ -127,6 +127,14 @@ def run_service():
         run_if_needed()
     except Exception:
         pass               # an upgrade step must never keep the memory service from starting
+
+    def connect_new():
+        try:
+            from orimem.upgrade import connect_new_agents
+            connect_new_agents()
+        except Exception:
+            pass
+    threading.Thread(target=connect_new, daemon=True, name="orimem-connect-agents").start()
     backend = Backend()
     auth = secrets.token_urlsafe(32)
     last_request = [time.monotonic()]
