@@ -178,3 +178,24 @@ def test_claude_plugin_manifests_are_consistent():
     assert (root / plugin['skills'][0] / 'orimem' / 'SKILL.md').exists()
     hooks = json.loads((root / plugin['hooks']).read_text(encoding='utf-8'))['hooks']
     assert set(hooks) == {'SessionStart', 'UserPromptSubmit', 'Stop'}
+
+
+def test_mcp_server_starts_without_embedding_model(env):
+    """A missing model must not take the server down: settings, capture and health keep working."""
+    import os, subprocess, sys
+    from conftest import SRC
+    requests = [
+        dict(jsonrpc='2.0', id=1, method='initialize', params={}),
+        dict(jsonrpc='2.0', id=2, method='tools/list', params={}),
+        dict(jsonrpc='2.0', id=3, method='tools/call', params=dict(name='config_get', arguments=dict(key='capture.enabled'))),
+        dict(jsonrpc='2.0', id=4, method='tools/call', params=dict(name='recall', arguments=dict(query='x', scope=['10 项目']))),
+    ]
+    stdin = ''.join(json.dumps(r) + '\n' for r in requests)
+    environment = dict(os.environ, PYTHONPATH=str(SRC))
+    result = subprocess.run([sys.executable, '-X', 'utf8', '-m', 'orimem', 'mcp', '--direct'], input=stdin,
+                            capture_output=True, text=True, encoding='utf-8', env=environment, timeout=120)
+    replies = {r['id']: r for r in map(json.loads, result.stdout.splitlines())}
+    assert replies[1]['result']['serverInfo']['name'] == 'orimem', result.stderr
+    assert any(t['name'] == 'capture_now' for t in replies[2]['result']['tools'])
+    assert replies[3]['result']['content'][0]['text'] == 'true'
+    assert 'model download' in replies[4]['error']['message']

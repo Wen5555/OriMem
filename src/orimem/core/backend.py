@@ -558,6 +558,11 @@ class Backend:
             policy=Policy(self,c,time_intent)
             model = c.execute("SELECT value FROM meta WHERE key='model'").fetchone()
             if not model or model[0] != self.embedder.model_id:
+                from .embedding import choose_backend
+                try:
+                    choose_backend(Path(getattr(self.embedder, "path", "")))
+                except RuntimeError as missing:
+                    raise ValueError(str(missing) + ", then `orimem sync`") from None
                 raise ValueError("Index model mismatch; sync before semantic retrieval")
             generation_row = c.execute(
                 "SELECT value FROM meta WHERE key='recall_generation'"

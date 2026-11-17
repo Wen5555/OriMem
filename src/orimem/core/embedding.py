@@ -37,15 +37,23 @@ def choose_backend(path: Path) -> str:
         return "onnx"
     if has_torch:
         return "torch"
-    raise RuntimeError("No usable embedding backend: run `orimem model download` "
-                       "(ONNX, needs onnxruntime + tokenizers) or install orimem[torch]")
+    raise RuntimeError("Embedding model not installed: run `orimem model download` "
+                       "(ONNX, needs onnxruntime + tokenizers) or install orimem-mcp[torch]")
 
 
 class Embedder:
     def __init__(self, model_path=MODEL, device=None):
         self.path = Path(model_path)
-        manifest = json.loads((self.path / "manifest.json").read_text(encoding="utf-8"))
-        self.model_id = manifest["repository"] + "@" + manifest["revision"] + ":mean:384:prefix-v1"
+        manifest_path = self.path / "manifest.json"
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            repository, revision = manifest["repository"], manifest["revision"]
+        else:
+            # Model not installed yet: the server still starts (settings, capture, lexical search);
+            # embedding raises a clear error until `orimem model download` has run. The id is the
+            # pinned revision, identical to the one a downloaded manifest yields.
+            from orimem.model import REPOSITORY as repository, REVISION as revision
+        self.model_id = repository + "@" + revision + ":mean:384:prefix-v1"
         self.device = device
         self.backend = None
         self._model = None

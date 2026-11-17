@@ -3,7 +3,7 @@
   "name": "io.github.Wen5555/orimem",
   "title": "OriMem",
   "description": "Long-term memory for coding agents in your own Obsidian vault: recall, write-back, capture.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "repository": {
     "url": "https://github.com/Wen5555/OriMem",
     "source": "github"
@@ -13,7 +13,7 @@
     {
       "registryType": "pypi",
       "identifier": "orimem-mcp",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "runtimeHint": "uvx",
       "packageArguments": [
         { "type": "positional", "value": "mcp" }
