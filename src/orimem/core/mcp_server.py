@@ -57,8 +57,18 @@ def local_call(name, args):
             result["schedule"] = daily.apply_schedule()
         return result
     if name == "capture_now":
-        from orimem.capture import collect
-        return collect([args["source"]] if args.get("source") else None)
+        from orimem.capture import collect, resolve
+        source = args.get("source")
+        only = None
+        if source and (args.get("session") or args.get("path")):
+            only = resolve(source, args.get("session"), args.get("path"))
+            if only is None:
+                return dict(captured=False, reason="transcript not found under the configured source folder")
+        run = lambda: collect([source] if source else None, only_path=only)
+        if args.get("background"):
+            __import__("threading").Thread(target=run, daemon=True, name="orimem-capture-now").start()
+            return dict(scheduled=True, source=source, path=only)
+        return run()
     raise ValueError("Unknown local tool")
 
 
@@ -217,7 +227,10 @@ TOOLS = [
         name="capture_now",
         description="Incrementally capture new or changed conversations from the enabled agents (Claude Code, Codex, dsh) into the vault now. Honors capture.enabled and capture.since.",
         annotations=WRITE,
-        inputSchema=obj(dict(source=dict(type="string", enum=["claude", "codex", "dsh"]))),
+        inputSchema=obj(dict(source=dict(type="string", enum=["claude", "codex", "dsh"]),
+                             session=dict(type="string", minLength=1, maxLength=200),
+                             path=dict(type="string", minLength=1, maxLength=1000),
+                             background=dict(type="boolean"))),
     ),
 ]
 

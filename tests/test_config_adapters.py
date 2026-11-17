@@ -19,7 +19,7 @@ def test_config_defaults_and_set(env):
 def test_hook_asks_daily_once_and_spawns_capture(env, monkeypatch):
     from orimem import config, hook
     spawned = []
-    monkeypatch.setattr(hook, '_spawn_capture', lambda agent, transcript: spawned.append((agent, transcript)))
+    monkeypatch.setattr(hook, 'request_capture', lambda agent, session, transcript: spawned.append((agent, transcript)))
     out = hook.handle(dict(hook_event_name='SessionStart', session_id='abc', cwd='D:/x', source='startup'), 'claude')
     assert 'config_set' in out['hookSpecificOutput']['additionalContext']
     config.set_value('daily_summary.enabled', False)
@@ -83,9 +83,6 @@ def test_dsh_install_uninstall_roundtrip(env):
     empty.mkdir()
     (empty / 'cordis.patch.yml').write_text('# empty layer\n[]\n', encoding='utf-8')
     out = adapters.install(['dsh'])
-    assert out['dsh']['hooks_file'] is None      # dsh hooks are opt-in
-    from orimem.adapters import install_dsh, Backup
-    install_dsh(Backup(), True, dsh_hooks=True)
     assert 'error' not in out['dsh'], out
     for patch in (profile / 'cordis.patch.yml', empty / 'cordis.patch.yml'):
         data = yaml.load(patch.read_text(encoding='utf-8'), Loader=adapters._DshLoader)
@@ -106,3 +103,16 @@ def test_mcp_instructions_carry_daily_question_only_while_ask(env):
     assert 'config_set' in server_instructions()
     config.set_value('daily_summary.enabled', False)
     assert 'daily_summary' not in server_instructions()
+
+
+def test_hook_session_ids_and_service_fallback(env, monkeypatch):
+    from orimem import hook
+    assert hook.normalized_session('dsh', 'session-abc') == 'dsh-abc'
+    assert hook.normalized_session('claude', 'u1') == 'claude-u1'
+    assert hook.normalized_session('codex', 'x1') == 'x1'
+    spawned = []
+    monkeypatch.setattr(hook, '_spawn_capture', lambda *a: spawned.append(a))
+    assert hook.request_capture('dsh', 'session-abc', None) == 'spawned'      # no service running
+    assert spawned == [('dsh', 'session-abc', None)]
+    monkeypatch.setattr(hook, '_notify_service', lambda args: True)
+    assert hook.request_capture('dsh', 'session-abc', None) == 'service'

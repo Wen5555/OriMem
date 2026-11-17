@@ -15,7 +15,7 @@
 |---|---|---|---|---|
 | Claude Code | `claude mcp add -s user`（找不到 CLI 时写入 `~/.claude.json`） | `~/.claude/skills/orimem` | `~/.claude/settings.json` | `~/.claude/projects/*/<uuid>.jsonl` |
 | Codex | `~/.codex/config.toml` 中的 `[mcp_servers.orimem]` | `~/.codex/skills/orimem` | `~/.codex/hooks.json` | `~/.codex/sessions/**/rollout-*.jsonl` |
-| DeepSeek Harness (dsh) | profile 的 `cordis.patch.yml` 插入 `dsh-mcp-client` | `~/.dsh/skills/orimem` | 默认不装（dsh 在自己的沙箱里运行钩子，写不到 OriMem 数据目录）；靠 MCP 服务定时扫描采集 | `~/.dsh/sessions/**/session.v4.jsonl.zstd` |
+| DeepSeek Harness (dsh) | profile 的 `cordis.patch.yml` 插入 `dsh-mcp-client` | `~/.dsh/skills/orimem` | 通过 `dsh-hooks-claude-code` 桥接；钩子只通知后台服务去采集，自己不写文件，所以在 dsh 沙箱里也能运行 | `~/.dsh/sessions/**/session.v4.jsonl.zstd` |
 | 其他 MCP 客户端 | `orimem snippet` 输出 JSON 配置 | 手动复制 Skill 目录或 AGENTS.md 片段 | — | — |
 
 ## 安装
@@ -123,6 +123,10 @@ orimem uninstall
 - dsh 已用真实对话（`dsh headless`）验证过 MCP 调用、技能发现、每日询问和采集。dsh 的 headless profile 默认走需要 API Key 的官方接口；使用账号登录的话，需要把模型路由改成 `deepseek-account`。
 - 只在 Windows 上做过完整测试；macOS 和 Linux 的 cron 调度及路径逻辑已经写好，但还没有实测。
 - 自定义 `ORIMEM_HOME` 时，安装器会在 MCP、钩子和计划任务的命令里写入 `--home <目录>`，不依赖环境变量。
+
+## 自测
+
+各 agent 的验证步骤和期望结果见 [docs/TESTING.md](docs/TESTING.md)。
 
 ## 开发
 

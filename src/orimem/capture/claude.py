@@ -39,6 +39,13 @@ def discover():
             yield path
 
 
+def find(session_id: str):
+    sid = str(session_id).removeprefix(PREFIX)
+    if not UUID.fullmatch(sid):
+        return None
+    return next(iter(root().glob(f'*/{sid}.jsonl')), None) if root().is_dir() else None
+
+
 def transcript_for(path, session_uuid, projects=None):
     path = Path(path).resolve()
     if not UUID.fullmatch(session_uuid or '') or path.suffix != '.jsonl' or path.stem != session_uuid:

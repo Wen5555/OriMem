@@ -40,9 +40,22 @@ def mcp_command() -> tuple[str, list[str]]:
     return python_exe(), base_args() + ['mcp']
 
 
-def hook_command(agent: str) -> str:
-    quoted = ' '.join(f'"{a}"' if ' ' in a else a for a in base_args())
-    return f'"{python_exe()}" {quoted} hook --agent {agent}'
+def hook_command(agent: str, shell: str = 'portable') -> str:
+    """Hook command line. Agents run hooks through different shells (Claude Code: bash on Windows,
+    dsh: the user's shell, often PowerShell; Codex: commandWindows in PowerShell).
+
+    'portable' uses unquoted forward-slash paths, which bash, PowerShell and cmd all execute;
+    paths with spaces fall back to PowerShell's call operator on Windows ('powershell') or
+    POSIX quoting elsewhere.
+    """
+    parts = [python_exe()] + base_args() + ['hook', '--agent', agent]
+    parts = [p.replace('\\', '/') if (':' in p or '\\' in p) else p for p in parts]
+    if shell == 'powershell' or (os.name == 'nt' and any(' ' in p for p in parts)):
+        return '& ' + ' '.join(f'"{p}"' if (' ' in p or i == 0) else p for i, p in enumerate(parts))
+    if any(' ' in p for p in parts):
+        import shlex
+        return shlex.join(parts)
+    return ' '.join(parts)
 
 
 def skill_source() -> Path:
@@ -107,7 +120,7 @@ def merge_hooks(data: dict, agent: str, windows_key: bool = False) -> dict:
         entry = dict(type='command', command=hook_command(agent), timeout=20 if event == 'SessionStart' else 10,
                      statusMessage='OriMem')
         if windows_key:
-            entry['commandWindows'] = '& ' + hook_command(agent)
+            entry['commandWindows'] = hook_command(agent, 'powershell')
         groups.append(dict(hooks=[entry]))
         hooks[event] = groups
     return data
@@ -283,11 +296,11 @@ def _patch_text_with_block(text: str, block: str) -> str:
     return body.rstrip('\n') + '\n' + block + '\n'
 
 
-def install_dsh(backup: Backup, hooks: bool, profiles=None, dsh_hooks: bool = False) -> dict:
-    """dsh runs hook commands inside its own workspace sandbox, where they cannot write OriMem's
-    data, so capture is done by the MCP service's periodic scan; the hook bridge is opt-in."""
+def install_dsh(backup: Backup, hooks: bool, profiles=None) -> dict:
+    """dsh runs hook commands through its session shell (and sandbox). The OriMem hook therefore
+    never writes itself: it asks the running OriMem service to capture, and the service's
+    periodic scan covers sessions whose hook could not run."""
     import yaml
-    hooks = hooks and dsh_hooks
     p = dsh_paths(profiles)
     if not p['home'].exists():
         raise RuntimeError('DeepSeek Harness home not found: ' + str(p['home']))

@@ -41,6 +41,19 @@ def _save_state(state: dict) -> None:
     tmp.replace(path)
 
 
+def resolve(source: str, session: str | None = None, path: str | None = None) -> str | None:
+    """One transcript of ``source``, by explicit path (must live under that source's folder) or session id."""
+    mod = module(source)
+    root = mod.root().resolve()
+    candidate = None
+    if path:
+        p = Path(path).resolve()
+        candidate = p if p.is_file() and p.is_relative_to(root) else None
+    if candidate is None and session:
+        candidate = mod.find(session)
+    return str(candidate) if candidate else None
+
+
 def collect(sources=None, backfill: bool = False, project: bool = True, only_path: str | None = None, backend=None) -> dict:
     """Incrementally mirror changed transcripts, stage them, then project into the vault.
 

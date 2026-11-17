@@ -116,13 +116,15 @@ def cmd_snippet(a) -> None:
 def cmd_capture(a) -> None:
     from orimem.capture import collect, module
     time.sleep(min(max(a.delay, 0), 30))
+    from orimem.capture import resolve
     only = None
-    if a.path:
+    if a.path or a.session:
         if not a.source:
-            raise SystemExit('--path requires --source')
-        root = module(a.source).root().resolve()
-        candidate = Path(a.path).resolve()
-        only = str(candidate) if candidate.is_relative_to(root) else None
+            raise SystemExit('--path/--session require --source')
+        only = resolve(a.source, a.session, a.path)
+        if only is None:
+            _print(dict(captured=False, reason='transcript not found under the configured source folder'))
+            return
     _print(collect([a.source] if a.source else None, backfill=a.backfill, only_path=only))
 
 
@@ -241,6 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser('capture', help='incrementally capture conversations into the vault')
     s.add_argument('--source', choices=['claude', 'codex', 'dsh'])
     s.add_argument('--path', help='one transcript (must live under that source folder)')
+    s.add_argument('--session', help='one session id of that source')
     s.add_argument('--backfill', action='store_true', help='ignore capture.since')
     s.add_argument('--delay', type=float, default=0)
     s.set_defaults(fn=cmd_capture)

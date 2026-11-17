@@ -33,6 +33,13 @@ def discover():
         yield from base.glob('*/*/*/rollout-*.jsonl')
 
 
+def find(session_id: str):
+    sid = str(session_id)
+    if not sid or any(c in sid for c in '*?[]/\\') or not root().is_dir():
+        return None
+    return next(iter(root().glob(f'*/*/*/rollout-*-{sid}.jsonl')), None)
+
+
 def _text(content, kinds):
     out = []
     for block in content or []:

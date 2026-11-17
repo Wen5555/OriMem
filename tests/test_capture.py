@@ -70,3 +70,18 @@ def test_collect_respects_disabled_and_since(env):
     assert collect()['sources']['claude']['captured'] == 0
     config.set_value('capture.enabled', False)
     assert collect()['enabled'] is False
+
+
+def test_find_session_by_id_and_capture_now_tool(env):
+    from orimem.capture import claude, codex, dsh, resolve
+    from orimem.core.mcp_server import local_call
+    c = write_jsonl(env['home'] / '.claude' / 'projects' / 'D--proj' / f'{CLAUDE_UUID}.jsonl', claude_records('D:/proj'))
+    x = write_jsonl(env['home'] / '.codex' / 'sessions' / '2026' / '11' / '17' / f'rollout-2026-11-17T02-00-00-{CODEX_ID}.jsonl', codex_records('D:/proj'))
+    d = write_zstd_jsonl(env['home'] / '.dsh' / 'sessions' / 'w' / DSH_ID / 'session.v4.jsonl.zstd', dsh_records('D:/proj'))
+    assert claude.find(CLAUDE_UUID) == c and claude.find('claude-' + CLAUDE_UUID) == c
+    assert codex.find(CODEX_ID) == x and codex.find('*') is None
+    assert dsh.find(DSH_ID) == d and dsh.find(DSH_ID.removeprefix('session-')) == d
+    assert resolve('claude', path=str(env['tmp'] / 'elsewhere.jsonl')) is None        # outside the source root
+    out = local_call('capture_now', dict(source='dsh', session=DSH_ID))
+    assert out['sources']['dsh']['captured'] == 1 and out['sources']['dsh']['scanned'] == 1
+    assert local_call('capture_now', dict(source='dsh', session='session-missing'))['captured'] is False

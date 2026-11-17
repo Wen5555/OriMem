@@ -38,6 +38,14 @@ def discover():
         yield from base.glob('*/*/session.v*.jsonl')
 
 
+def find(session_id: str):
+    sid = str(session_id).removeprefix(PREFIX)
+    sid = sid if sid.startswith('session-') else 'session-' + sid
+    if any(c in sid for c in '*?[]/\\') or not root().is_dir():
+        return None
+    return next(iter(root().glob(f'*/{sid}/session.v*.jsonl*')), None)
+
+
 def _lines(path: Path):
     raw = path.read_bytes()
     if path.suffix == '.zstd':
