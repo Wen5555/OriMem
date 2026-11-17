@@ -1,0 +1,14 @@
+{
+  "name": "orimem",
+  "description": "OriMem: long-term memory for coding agents, kept in your own Obsidian vault.",
+  "owner": {
+    "name": "Wen5555"
+  },
+  "plugins": [
+    {
+      "name": "orimem",
+      "source": "./",
+      "description": "Long-term memory in your own Obsidian vault: hybrid recall, verified write-back and conversation capture over MCP. Requires the orimem CLI."
+    }
+  ]
+}

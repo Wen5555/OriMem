@@ -1,0 +1,8 @@
+{
+  "description": "OriMem: project context on prompts, session capture when a turn ends.",
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "orimem hook --agent claude", "timeout": 20, "statusMessage": "OriMem" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "orimem hook --agent claude", "timeout": 10, "statusMessage": "OriMem" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "orimem hook --agent claude", "timeout": 10, "statusMessage": "OriMem" }] }]
+  }
+}

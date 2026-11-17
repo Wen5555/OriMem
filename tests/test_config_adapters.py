@@ -154,3 +154,27 @@ def test_dsh_bundle_manifest_is_valid():
     patch = yaml.load((root / 'cordis.patch.yml').read_text(encoding='utf-8'), Loader=adapters._DshLoader)
     ids = [e['id'] for e in patch[0]['insert']]
     assert ids == ['orimem-mcp', 'orimem-hooks']
+
+
+def test_claude_plugin_installed_skips_user_level_registration(env):
+    from orimem import adapters
+    plugins = env['home'] / '.claude' / 'plugins'
+    plugins.mkdir(parents=True)
+    (plugins / 'installed_plugins.json').write_text(json.dumps(
+        {'version': 2, 'plugins': {'orimem@orimem': [{'scope': 'user'}]}}), encoding='utf-8')
+    out = adapters.install(['claude'])
+    assert out['claude']['via_plugin'] is True
+    assert not (env['home'] / '.claude.json').exists() and not (env['home'] / '.claude' / 'settings.json').exists()
+
+
+def test_claude_plugin_manifests_are_consistent():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    market = json.loads((root / '.claude-plugin' / 'marketplace.json').read_text(encoding='utf-8'))
+    plugin = json.loads((root / '.claude-plugin' / 'plugin.json').read_text(encoding='utf-8'))
+    assert market['plugins'][0]['name'] == plugin['name'] == 'orimem'
+    for rel in plugin['skills'] + [plugin['hooks'], plugin['icon']]:
+        assert (root / rel).exists(), rel
+    assert (root / plugin['skills'][0] / 'orimem' / 'SKILL.md').exists()
+    hooks = json.loads((root / plugin['hooks']).read_text(encoding='utf-8'))['hooks']
+    assert set(hooks) == {'SessionStart', 'UserPromptSubmit', 'Stop'}

@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/icon.png" width="96" alt="OriMem icon">
+
 # OriMem
 
 **Long-term memory for coding agents, kept in your own Obsidian vault.**
@@ -77,6 +79,14 @@ Non-interactive: `orimem init --yes --vault ~/Notes --agents claude,codex`. Behi
 | **Codex** | `[mcp_servers.orimem]` in `~/.codex/config.toml` | `~/.codex/skills/orimem` | `~/.codex/hooks.json` | `~/.codex/sessions/**/rollout-*.jsonl` |
 | **DeepSeek Harness (dsh)** | `dsh-mcp-client` entry in the profile's `cordis.patch.yml` | `~/.dsh/skills/orimem` | `dsh-hooks-claude-code` bridge | `~/.dsh/sessions/**/session.v4.jsonl.zstd` |
 | Any other MCP client | `orimem snippet` prints the JSON | copy the skill folder | — | — |
+
+**Claude Code users** can also install it as a plugin (MCP server, skill and hooks in one step; still needs the `orimem` command):
+
+```text
+/plugin install orimem --marketplace Wen5555/OriMem
+```
+
+On older Claude Code versions: `/plugin marketplace add Wen5555/OriMem`, then `/plugin install orimem@orimem`.
 
 **DeepSeek Harness users** can also add the [`dsh-orimem`](integrations/dsh) bundle from the community plugin market (or `dsh plugin --profile <name> add dsh-orimem-<version>.tgz` from a [release](https://github.com/Wen5555/OriMem/releases)); it needs the `orimem` command from the quick start.
 

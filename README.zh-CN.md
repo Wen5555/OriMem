@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/icon.png" width="96" alt="OriMem 图标">
+
 # OriMem
 
 **给编程 agent 的长期记忆，存在你自己的 Obsidian 库里。**
@@ -81,6 +83,14 @@ orimem init
 | **Codex** | `~/.codex/config.toml` 中的 `[mcp_servers.orimem]` | `~/.codex/skills/orimem` | `~/.codex/hooks.json` | `~/.codex/sessions/**/rollout-*.jsonl` |
 | **DeepSeek Harness（dsh）** | profile 的 `cordis.patch.yml` 中插入 `dsh-mcp-client` | `~/.dsh/skills/orimem` | `dsh-hooks-claude-code` 桥接 | `~/.dsh/sessions/**/session.v4.jsonl.zstd` |
 | 其他 MCP 客户端 | `orimem snippet` 输出配置 JSON | 复制技能目录 | — | — |
+
+**Claude Code 用户**也可以以插件形式安装，一步装好 MCP 服务、技能和钩子；插件同样依赖 `orimem` 命令：
+
+```text
+/plugin install orimem --marketplace Wen5555/OriMem
+```
+
+较旧版本的 Claude Code 需要分两步：先运行 `/plugin marketplace add Wen5555/OriMem`，再运行 `/plugin install orimem@orimem`。
 
 **DeepSeek Harness 用户**也可以在社区插件市场里安装 [`dsh-orimem`](integrations/dsh) 插件包，或者从 [Release](https://github.com/Wen5555/OriMem/releases) 下载后运行 `dsh plugin --profile <名称> add dsh-orimem-<版本>.tgz`。插件包依赖快速开始里装好的 `orimem` 命令。
 

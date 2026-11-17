@@ -165,8 +165,19 @@ def claude_paths() -> dict:
                 state=home / '.claude.json')
 
 
+def claude_plugin_installed() -> bool:
+    """True when the orimem Claude Code plugin (MCP + skill + hooks) is installed."""
+    try:
+        data = json.loads((Path.home() / '.claude' / 'plugins' / 'installed_plugins.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return False
+    return any(key.split('@', 1)[0] == 'orimem' for key in (data.get('plugins') or {}))
+
+
 def install_claude(backup: Backup, hooks: bool) -> dict:
     p = claude_paths()
+    if claude_plugin_installed():
+        return dict(via_plugin=True, note='the orimem Claude Code plugin already provides MCP, skill and hooks')
     exe, args = mcp_command()
     out = dict(skill=install_skill(p['skills']))
     cli = shutil.which('claude')
